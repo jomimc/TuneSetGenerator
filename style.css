@@ -1,0 +1,151 @@
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1em;
+  color: #333;
+}
+
+h1 { margin-bottom: 0.5em; }
+
+label { font-weight: bold; }
+
+input[type="number"], select {
+  padding: 0.5em;
+  font-size: 1em;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+input[type="number"] { width: 120px; }
+
+button {
+  background-color: #4CAF50;
+  border: none;
+  color: white;
+  padding: 0.5em 1em;
+  font-size: 1em;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:hover { background-color: #45a049; }
+
+button:disabled {
+  background-color: #999;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+#tunebook-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  flex-wrap: wrap;
+}
+
+#loadProgress {
+  width: 100%;
+  color: #666;
+  font-style: italic;
+  min-height: 1.2em;
+}
+
+#tunebookInfo {
+  width: 100%;
+  font-weight: bold;
+}
+
+#picker-section {
+  margin-top: 1em;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  flex-wrap: wrap;
+}
+
+#set-display h3 {
+  margin: 1em 0 0.3em;
+  text-transform: capitalize;
+}
+
+#tuneList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tune-card {
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin: 10px 0;
+  padding: 12px;
+}
+
+.tune-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drag-handle {
+  cursor: grab;
+  font-size: 1.3em;
+  color: #888;
+  user-select: none;
+  padding-right: 4px;
+}
+
+.drag-handle:active { cursor: grabbing; }
+
+.tune-info {
+  flex: 1;
+  font-size: 1.1em;
+}
+
+.tune-info a {
+  color: #2e7d32;
+  text-decoration: none;
+  font-weight: bold;
+}
+
+.tune-info a:hover { text-decoration: underline; }
+
+.tune-key {
+  color: #666;
+  font-weight: normal;
+  font-size: 0.9em;
+}
+
+.mark-played-btn {
+  background-color: #2196F3;
+  font-size: 0.85em;
+  padding: 0.3em 0.8em;
+  white-space: nowrap;
+}
+
+.mark-played-btn:hover { background-color: #1976D2; }
+
+.abc-render {
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.abc-render svg {
+  max-width: 100%;
+}
+
+.sortable-ghost {
+  opacity: 0.4;
+}
+
+#reloadBtn {
+  background-color: #ff9800;
+  font-size: 0.85em;
+  padding: 0.4em 0.8em;
+}
+
+#reloadBtn:hover { background-color: #f57c00; }

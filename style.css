@@ -66,6 +66,12 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.toggle-label {
+  font-weight: normal;
+  cursor: pointer;
+  user-select: none;
+}
+
 #set-display h3 {
   margin: 1em 0 0.3em;
   text-transform: capitalize;
@@ -149,3 +155,82 @@ button:disabled {
 }
 
 #reloadBtn:hover { background-color: #f57c00; }
+
+/* Set action buttons row */
+#set-actions {
+  width: 100%;
+  display: flex;
+  gap: 0.5em;
+  flex-wrap: wrap;
+  margin-top: 0.5em;
+}
+
+#playedSetBtn {
+  background-color: #ff9800;
+}
+
+#playedSetBtn:hover { background-color: #f57c00; }
+
+#chooseSavedBtn {
+  background-color: #2196F3;
+}
+
+#chooseSavedBtn:hover { background-color: #1976D2; }
+
+#downloadSavedBtn {
+  background-color: #607D8B;
+}
+
+#downloadSavedBtn:hover { background-color: #455A64; }
+
+/* Saved sets modal */
+#saved-sets-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+#saved-sets-modal-content {
+  background: white;
+  padding: 1.5em;
+  border-radius: 8px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+#saved-sets-modal-content h3 {
+  margin-top: 0;
+}
+
+.saved-set-item {
+  padding: 0.8em;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin: 0.5em 0;
+  cursor: pointer;
+}
+
+.saved-set-item:hover {
+  background: #f0f0f0;
+}
+
+.saved-set-tunes {
+  color: #666;
+  font-size: 0.9em;
+}
+
+#closeSavedModal {
+  margin-top: 1em;
+  background-color: #999;
+}
+
+#closeSavedModal:hover { background-color: #777; }

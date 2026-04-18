@@ -2,49 +2,62 @@
   'use strict';
 
   // --- State ---
-  let memberId = null;
-  let tunebook = [];
-  let currentSet = null; // {rhythm, tunes: [{id, name, type, url, key?, abc?}]}
+  var memberId = null;
+  var tunebook = [];
+  var currentSet = null;
+  var incipitsData = null;   // combined incipits.json, keyed by tune_id string
+  var tuneChunks = {};       // cached full-tune chunks, keyed by chunk number
+  var showFullTunes = false;
 
-  // --- IndexedDB via idb-keyval ---
-  const store = idbKeyval.createStore('tunesetgen', 'cache');
+  var CHUNK_SIZE = 1000;
 
-  async function dbGet(key) { return idbKeyval.get(key, store); }
-  async function dbSet(key, val) { return idbKeyval.set(key, val, store); }
-  async function dbDel(key) { return idbKeyval.del(key, store); }
+  // --- IndexedDB via idb-keyval (tunebook cache only) ---
+  var store = idbKeyval.createStore('tunesetgen', 'cache');
+
+  function dbGet(key) { return idbKeyval.get(key, store); }
+  function dbSet(key, val) { return idbKeyval.set(key, val, store); }
 
   // --- DOM refs ---
-  const memberInput = document.getElementById('memberInput');
-  const loadBtn = document.getElementById('loadBtn');
-  const reloadBtn = document.getElementById('reloadBtn');
-  const loadProgress = document.getElementById('loadProgress');
-  const tunebookInfo = document.getElementById('tunebookInfo');
-  const pickerSection = document.getElementById('picker-section');
-  const rhythmSelect = document.getElementById('rhythmSelect');
-  const pickBtn = document.getElementById('pickBtn');
-  const saveBtn = document.getElementById('saveBtn');
-  const setDisplay = document.getElementById('set-display');
+  var memberInput = document.getElementById('memberInput');
+  var loadBtn = document.getElementById('loadBtn');
+  var reloadBtn = document.getElementById('reloadBtn');
+  var loadProgress = document.getElementById('loadProgress');
+  var tunebookInfo = document.getElementById('tunebookInfo');
+  var pickerSection = document.getElementById('picker-section');
+  var rhythmSelect = document.getElementById('rhythmSelect');
+  var pickBtn = document.getElementById('pickBtn');
+  var saveBtn = document.getElementById('saveBtn');
+  var playedSetBtn = document.getElementById('playedSetBtn');
+  var chooseSavedBtn = document.getElementById('chooseSavedBtn');
+  var downloadSavedBtn = document.getElementById('downloadSavedBtn');
+  var setDisplay = document.getElementById('set-display');
+  var fullTuneToggle = document.getElementById('fullTuneToggle');
+  var savedSetsModal = document.getElementById('saved-sets-modal');
+  var savedSetsList = document.getElementById('saved-sets-list');
+  var closeSavedModal = document.getElementById('closeSavedModal');
+
+  var PLAYED_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   // --- Utility ---
   function todayStr() {
-    const d = new Date();
+    var d = new Date();
     return d.getFullYear() + '-' +
       String(d.getMonth() + 1).padStart(2, '0') + '-' +
       String(d.getDate()).padStart(2, '0');
   }
 
   function pickRandomUnique(array, count) {
-    const shuffled = array.slice();
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    var shuffled = array.slice();
+    for (var i = shuffled.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
     }
     return shuffled.slice(0, count);
   }
 
-  // --- Played-today tracking (localStorage) ---
+  // --- Played tracking (localStorage, 24-hour timer) ---
   function getPlayedMap() {
-    const raw = localStorage.getItem('played:' + memberId);
+    var raw = localStorage.getItem('played:' + memberId);
     return raw ? JSON.parse(raw) : {};
   }
 
@@ -53,35 +66,104 @@
   }
 
   function markTunePlayed(tuneId) {
-    const map = getPlayedMap();
-    map[tuneId] = todayStr();
+    var map = getPlayedMap();
+    map[tuneId] = Date.now();
     setPlayedMap(map);
   }
 
-  // --- API ---
-  async function fetchTunebookFromAPI(mid) {
-    const allTunes = [];
-    let page = 1;
-    let totalPages = 1;
+  function isPlayedRecently(tuneId, playedMap) {
+    var ts = playedMap[tuneId];
+    if (!ts) return false;
+    var cutoff = Date.now() - PLAYED_DURATION_MS;
+    // Support legacy date string format ("YYYY-MM-DD")
+    if (typeof ts === 'string') {
+      return new Date(ts + 'T23:59:59').getTime() > cutoff;
+    }
+    return ts > cutoff;
+  }
 
-    while (page <= totalPages) {
-      loadProgress.textContent = totalPages > 1
-        ? 'Fetching page ' + page + ' of ' + totalPages + '...'
-        : 'Fetching tunebook...';
-
-      const url = 'https://thesession.org/members/' + mid +
-        '/tunebook?format=json&perpage=50&page=' + page;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error('API error: ' + resp.status);
-      const data = await resp.json();
-
-      if (page === 1 && (!data.tunes || data.tunes.length === 0)) {
-        throw new Error('No tunes found. Check the member number.');
+  function cleanPlayedMap() {
+    var map = getPlayedMap();
+    var cutoff = Date.now() - PLAYED_DURATION_MS;
+    var changed = false;
+    for (var id in map) {
+      var ts = map[id];
+      var expired = (typeof ts === 'number') ? ts < cutoff
+        : new Date(ts + 'T23:59:59').getTime() < cutoff;
+      if (expired) {
+        delete map[id];
+        changed = true;
       }
+    }
+    if (changed) setPlayedMap(map);
+  }
 
-      totalPages = data.pages;
-      allTunes.push(...data.tunes);
-      page++;
+  // --- Tune data loading ---
+
+  // Load combined incipits.json into memory (called once on app start)
+  async function loadIncipitsData() {
+    if (incipitsData) return;
+    var resp = await fetch('data/incipits.json');
+    if (!resp.ok) throw new Error('Failed to load incipits data');
+    incipitsData = await resp.json();
+  }
+
+  // Load a full-tune chunk on demand, cache in memory
+  async function loadTuneChunk(chunkId) {
+    if (tuneChunks[chunkId]) return tuneChunks[chunkId];
+    var resp = await fetch('data/tunes/' + chunkId + '.json');
+    if (!resp.ok) throw new Error('Failed to load tune chunk ' + chunkId);
+    tuneChunks[chunkId] = await resp.json();
+    return tuneChunks[chunkId];
+  }
+
+  // Get tune data for a given tune ID (incipit or full depending on toggle)
+  async function getTuneData(tuneId) {
+    var tid = String(tuneId);
+    if (!showFullTunes) {
+      if (incipitsData && incipitsData[tid]) return incipitsData[tid];
+    } else {
+      var chunkId = Math.floor(parseInt(tid) / CHUNK_SIZE);
+      var chunk = await loadTuneChunk(chunkId);
+      if (chunk[tid]) return chunk[tid];
+    }
+    // Fallback: fetch from thesession.org API
+    return fetchTuneDetailAPI(tuneId);
+  }
+
+  // --- Tunebook API ---
+  async function fetchTunebookFromAPI(mid) {
+    loadProgress.textContent = 'Fetching tunebook...';
+    var url = 'https://thesession.org/members/' + mid +
+      '/tunebook?format=json&perpage=100&page=1';
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('API error: ' + resp.status);
+    var data = await resp.json();
+
+    if (!data.tunes || data.tunes.length === 0) {
+      throw new Error('No tunes found. Check the member number.');
+    }
+
+    var totalPages = data.pages;
+    var allTunes = data.tunes.slice();
+
+    if (totalPages > 1) {
+      loadProgress.textContent = 'Fetching pages 2\u2013' + totalPages + ' in parallel...';
+      var promises = [];
+      for (var p = 2; p <= totalPages; p++) {
+        var pageUrl = 'https://thesession.org/members/' + mid +
+          '/tunebook?format=json&perpage=100&page=' + p;
+        promises.push(
+          fetch(pageUrl).then(function (r) {
+            if (!r.ok) throw new Error('API error: ' + r.status);
+            return r.json();
+          })
+        );
+      }
+      var results = await Promise.all(promises);
+      for (var i = 0; i < results.length; i++) {
+        allTunes.push.apply(allTunes, results[i].tunes);
+      }
     }
 
     await dbSet('tunebook:' + mid, allTunes);
@@ -90,34 +172,34 @@
 
   async function loadTunebook(mid, forceReload) {
     if (!forceReload) {
-      const cached = await dbGet('tunebook:' + mid);
+      var cached = await dbGet('tunebook:' + mid);
       if (cached) return cached;
     }
     return fetchTunebookFromAPI(mid);
   }
 
-  async function fetchTuneDetail(tuneId) {
-    const cached = await dbGet('abc:' + tuneId);
-    if (cached) return cached;
-
-    const url = 'https://thesession.org/tunes/' + tuneId + '?format=json';
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('API error fetching tune ' + tuneId + ': ' + resp.status);
-    const data = await resp.json();
-
+  // Fallback for tunes not in preprocessed data
+  async function fetchTuneDetailAPI(tuneId) {
+    var url = 'https://thesession.org/tunes/' + tuneId + '?format=json';
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('API error fetching tune ' + tuneId);
+    var data = await resp.json();
     if (!data.settings || data.settings.length === 0) {
-      throw new Error('No settings found for tune ' + tuneId);
+      throw new Error('No settings for tune ' + tuneId);
     }
-
-    const detail = { key: data.settings[0].key, abc: data.settings[0].abc };
-    await dbSet('abc:' + tuneId, detail);
-    return detail;
+    var s = data.settings[0];
+    return {
+      name: data.name,
+      type: data.type,
+      meter: getTimeSig(data.type),
+      mode: s.key,
+      abc: s.abc
+    };
   }
 
   // --- ABC helpers ---
   function convertKey(apiKey) {
-    // "Gmajor" → "G", "Aminor" → "Am", "Amixolydian" → "AMix", etc.
-    const modes = {
+    var modes = {
       'major': '', 'minor': 'm', 'mixolydian': 'Mix',
       'dorian': 'Dor', 'phrygian': 'Phr', 'lydian': 'Lyd', 'locrian': 'Loc'
     };
@@ -142,6 +224,7 @@
     return apiKey;
   }
 
+  // Used only by the API fallback
   function getTimeSig(type) {
     var sigs = {
       'reel': '4/4', 'jig': '6/8', 'slip jig': '9/8',
@@ -152,23 +235,25 @@
     return sigs[type] || '4/4';
   }
 
-  function buildABCString(name, type, key, abcBody) {
-    // thesession.org uses "!" after barlines as a line-break marker
-    var cleaned = abcBody.replace(/([\|:])\s*!\s+/g, '$1\n');
-    return 'X:1\nT:' + name + '\nM:' + getTimeSig(type) +
-      '\nL:1/8\nK:' + convertKey(key) + '\n' + cleaned;
+  function buildABCString(tuneData) {
+    // tuneData: {name, type, meter, mode, abc}
+    // Handle thesession.org "!" line-break markers (API fallback data)
+    var cleaned = tuneData.abc.replace(/([\|:])\s*!\s+/g, '$1\n');
+    return 'X:1\nT:' + tuneData.name +
+      '\nM:' + tuneData.meter +
+      '\nL:1/8\nK:' + convertKey(tuneData.mode) +
+      '\n' + cleaned;
   }
 
   // --- Rhythm bucketing ---
   function bucketByRhythm() {
     var buckets = {};
-    var today = todayStr();
     var played = getPlayedMap();
 
     for (var i = 0; i < tunebook.length; i++) {
       var tune = tunebook[i];
       if (!tune.type) continue;
-      if (played[tune.id] === today) continue;
+      if (isPlayedRecently(tune.id, played)) continue;
       if (!buckets[tune.type]) buckets[tune.type] = [];
       buckets[tune.type].push(tune);
     }
@@ -179,7 +264,6 @@
   function pickSet(selectedRhythm) {
     var buckets = bucketByRhythm();
 
-    // Weighted-random: each rhythm's weight = its bucket size
     var weightedRhythms = [];
     for (var r in buckets) {
       if (buckets[r].length >= 3) {
@@ -232,7 +316,6 @@
     list.id = 'tuneList';
     setDisplay.appendChild(list);
 
-    // Build cards first (before async ABC fetch)
     for (var i = 0; i < set.tunes.length; i++) {
       var tune = set.tunes[i];
       var card = document.createElement('div');
@@ -273,15 +356,15 @@
       }
     });
 
-    // Fetch ABC for each tune in parallel
+    // Look up tune data and render ABC
     var promises = set.tunes.map(function (tune, idx) {
-      return fetchTuneDetail(tune.id).then(function (detail) {
-        var abcStr = buildABCString(tune.name, tune.type, detail.key, detail.abc);
+      return getTuneData(tune.id).then(function (tuneData) {
+        // Store mode on tune object for save/download
+        tune.mode = tuneData.mode;
+        var abcStr = buildABCString(tuneData);
         ABCJS.renderAbc('abc-' + idx, abcStr, { responsive: 'resize' });
         document.getElementById('key-' + idx).textContent =
-          ' \u2014 ' + formatKeyDisplay(detail.key);
-        set.tunes[idx].key = detail.key;
-        set.tunes[idx].abc = detail.abc;
+          ' \u2014 ' + formatKeyDisplay(tuneData.mode);
       }).catch(function (e) {
         document.getElementById('abc-' + idx).textContent =
           'Failed to load notation: ' + e.message;
@@ -305,13 +388,19 @@
     currentSet = null;
 
     try {
-      tunebook = await loadTunebook(mid, forceReload);
+      // Load incipits data and tunebook in parallel
+      await Promise.all([
+        loadIncipitsData(),
+        loadTunebook(mid, forceReload).then(function (t) { tunebook = t; })
+      ]);
       memberId = mid;
       localStorage.setItem('lastMemberId', mid);
+      cleanPlayedMap();
       loadProgress.textContent = '';
       tunebookInfo.textContent = 'Loaded ' + tunebook.length + ' tunes.';
       reloadBtn.style.display = '';
       updateRhythmDropdown();
+      updateSavedSetsButtons();
       pickerSection.style.display = '';
     } catch (e) {
       loadProgress.textContent = '';
@@ -329,6 +418,7 @@
     try {
       currentSet = pickSet(rhythmSelect.value);
       saveBtn.disabled = false;
+      playedSetBtn.disabled = false;
       await renderSet(currentSet);
     } catch (e) {
       alert(e.message);
@@ -341,18 +431,134 @@
 
     currentSet.tunes.forEach(function (t) { markTunePlayed(t.id); });
 
-    // Record the saved set in localStorage
     var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
     savedSets.push({
-      date: todayStr(),
+      date: new Date().toISOString(),
       rhythm: currentSet.rhythm,
-      tunes: currentSet.tunes.map(function (t) { return { id: t.id, name: t.name }; })
+      tunes: currentSet.tunes.map(function (t) {
+        return { id: t.id, name: t.name, type: t.type, mode: t.mode || '' };
+      })
     });
     localStorage.setItem('sets:' + memberId, JSON.stringify(savedSets));
 
     saveBtn.disabled = true;
+    playedSetBtn.disabled = true;
     document.querySelectorAll('.mark-played-btn').forEach(function (b) { b.disabled = true; });
     updateRhythmDropdown();
+    updateSavedSetsButtons();
+  });
+
+  // --- Event: Played Set (Don't Save) ---
+  playedSetBtn.addEventListener('click', function () {
+    if (!currentSet) return;
+
+    currentSet.tunes.forEach(function (t) { markTunePlayed(t.id); });
+
+    saveBtn.disabled = true;
+    playedSetBtn.disabled = true;
+    document.querySelectorAll('.mark-played-btn').forEach(function (b) { b.disabled = true; });
+    updateRhythmDropdown();
+  });
+
+  // --- Saved sets helpers ---
+  function updateSavedSetsButtons() {
+    var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
+    var hasSaved = savedSets.length > 0;
+    chooseSavedBtn.disabled = !hasSaved;
+    downloadSavedBtn.disabled = !hasSaved;
+  }
+
+  function formatSavedDate(dateStr) {
+    var d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.getFullYear() + '-' +
+      String(d.getMonth() + 1).padStart(2, '0') + '-' +
+      String(d.getDate()).padStart(2, '0');
+  }
+
+  // --- Event: Choose from Saved Sets ---
+  chooseSavedBtn.addEventListener('click', function () {
+    var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
+    if (savedSets.length === 0) { alert('No saved sets.'); return; }
+
+    savedSetsList.innerHTML = '';
+    for (var i = 0; i < savedSets.length; i++) {
+      var set = savedSets[i];
+      var item = document.createElement('div');
+      item.className = 'saved-set-item';
+      item.dataset.index = i;
+
+      var tuneNames = set.tunes.map(function (t) { return t.name; }).join(', ');
+      item.innerHTML =
+        '<strong>' + formatSavedDate(set.date) + '</strong> \u2014 ' +
+        set.rhythm + ' set<br>' +
+        '<span class="saved-set-tunes">' + tuneNames + '</span>';
+      savedSetsList.appendChild(item);
+    }
+    savedSetsModal.style.display = 'flex';
+  });
+
+  savedSetsList.addEventListener('click', function (e) {
+    var item = e.target.closest('.saved-set-item');
+    if (!item) return;
+
+    var idx = parseInt(item.dataset.index);
+    var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
+    var set = savedSets[idx];
+
+    currentSet = {
+      rhythm: set.rhythm,
+      tunes: set.tunes.map(function (t) {
+        return {
+          id: t.id,
+          name: t.name,
+          type: t.type || set.rhythm,
+          url: 'https://thesession.org/tunes/' + t.id,
+          mode: t.mode || ''
+        };
+      })
+    };
+
+    savedSetsModal.style.display = 'none';
+    saveBtn.disabled = true;
+    playedSetBtn.disabled = false;
+    renderSet(currentSet);
+  });
+
+  closeSavedModal.addEventListener('click', function () {
+    savedSetsModal.style.display = 'none';
+  });
+
+  savedSetsModal.addEventListener('click', function (e) {
+    if (e.target === savedSetsModal) savedSetsModal.style.display = 'none';
+  });
+
+  // --- Event: Download Saved Sets ---
+  downloadSavedBtn.addEventListener('click', function () {
+    var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
+    if (savedSets.length === 0) { alert('No saved sets to download.'); return; }
+
+    var rows = [];
+    for (var i = 0; i < savedSets.length; i++) {
+      var set = savedSets[i];
+      for (var j = 0; j < set.tunes.length; j++) {
+        var tune = set.tunes[j];
+        rows.push({
+          'Set #': i + 1,
+          'Date': formatSavedDate(set.date),
+          'Dance Type': set.rhythm,
+          'Tune #': j + 1,
+          'Tune ID': tune.id,
+          'Tune Name': tune.name,
+          'Key/Mode': tune.mode ? formatKeyDisplay(tune.mode) : ''
+        });
+      }
+    }
+
+    var ws = XLSX.utils.json_to_sheet(rows);
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Saved Sets');
+    XLSX.writeFile(wb, 'saved_sets.xlsx');
   });
 
   // --- Event delegation: mark played ---
@@ -366,8 +572,21 @@
     updateRhythmDropdown();
   });
 
-  // --- Init: restore last member ID ---
+  // --- Event: Full tune toggle ---
+  fullTuneToggle.addEventListener('change', function () {
+    showFullTunes = fullTuneToggle.checked;
+    if (currentSet) {
+      renderSet(currentSet);
+    }
+  });
+
+  // --- Init ---
   var lastMid = localStorage.getItem('lastMemberId');
   if (lastMid) memberInput.value = lastMid;
+
+  // Pre-load incipits data in background
+  loadIncipitsData().catch(function (e) {
+    console.warn('Failed to pre-load incipits:', e.message);
+  });
 
 })();

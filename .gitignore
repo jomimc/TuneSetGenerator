@@ -1,0 +1,15 @@
+# Raw download from TheSession-data
+tunes.json
+
+# Python
+__pycache__/
+
+# Not deployed
+prototype/
+benchmark.html
+CLAUDE.md
+
+# Preprocessed data not needed by the app
+data/tunes.json
+data/incipits/
+data/errors.json

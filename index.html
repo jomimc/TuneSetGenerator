@@ -24,14 +24,29 @@
       <option value="random">Random</option>
     </select>
     <button id="pickBtn">Pick</button>
-    <button id="saveBtn" disabled>Save Set</button>
+    <label class="toggle-label"><input type="checkbox" id="fullTuneToggle"> Full tunes</label>
+    <div id="set-actions">
+      <button id="saveBtn" disabled>Save Set</button>
+      <button id="playedSetBtn" disabled>Played Set (Don't Save)</button>
+      <button id="chooseSavedBtn" disabled>Choose from Saved Sets</button>
+      <button id="downloadSavedBtn" disabled>Download Saved Sets</button>
+    </div>
   </div>
 
   <div id="set-display"></div>
 
+  <div id="saved-sets-modal">
+    <div id="saved-sets-modal-content">
+      <h3>Saved Sets</h3>
+      <div id="saved-sets-list"></div>
+      <button id="closeSavedModal">Close</button>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/abcjs@6.4.4/dist/abcjs-basic-min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

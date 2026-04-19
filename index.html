@@ -10,21 +10,38 @@
   <h1>Tune Set Picker</h1>
 
   <div id="tunebook-section">
-    <label for="memberInput">thesession.org member #:</label>
-    <input type="number" id="memberInput" min="1" placeholder="e.g. 1">
-    <button id="loadBtn">Load Tunebook</button>
-    <button id="reloadBtn" style="display:none">Reload</button>
+    <div id="members-list"></div>
+    <button id="addMemberBtn" type="button">+ Playing with a friend? Add a member</button>
     <div id="loadProgress"></div>
     <div id="tunebookInfo"></div>
   </div>
 
   <div id="picker-section" style="display:none">
-    <label for="rhythmSelect"><b>Rhythm:</b></label>
-    <select id="rhythmSelect">
-      <option value="random">Random</option>
-    </select>
-    <button id="pickBtn">Pick</button>
-    <label class="toggle-label"><input type="checkbox" id="fullTuneToggle"> Full tunes</label>
+    <div class="control-row">
+      <label for="rhythmSelect"><b>Rhythm:</b></label>
+      <select id="rhythmSelect">
+        <option value="random">Random</option>
+      </select>
+      <button id="pickBtn">Pick</button>
+      <label class="toggle-label"><input type="checkbox" id="fullTuneToggle"> Full tunes</label>
+    </div>
+    <div class="control-row">
+      <label><b>Size:</b></label>
+      <div class="button-group" id="sizeButtons">
+        <button type="button" data-size="2">2</button>
+        <button type="button" data-size="3" class="active">3</button>
+        <button type="button" data-size="4">4</button>
+        <button type="button" data-size="5">5</button>
+      </div>
+    </div>
+    <div class="control-row">
+      <label><b>Keys:</b></label>
+      <div class="button-group" id="keyButtons">
+        <button type="button" data-key="any" class="active">Any</button>
+        <button type="button" data-key="same">All Same</button>
+        <button type="button" data-key="different">All Different</button>
+      </div>
+    </div>
     <div id="set-actions">
       <button id="saveBtn" disabled>Save Set</button>
       <button id="playedSetBtn" disabled>Played Set (Don't Save)</button>

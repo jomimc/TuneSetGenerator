@@ -41,9 +41,47 @@ button:disabled {
 
 #tunebook-section {
   display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  flex-wrap: wrap;
+  flex-direction: column;
+}
+
+#members-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+.member-row {
+  display: flex;
   align-items: center;
   gap: 0.5em;
   flex-wrap: wrap;
+  width: 100%;
+}
+
+#addMemberBtn {
+  background-color: #2196F3;
+  font-size: 0.9em;
+  padding: 0.4em 0.8em;
+}
+
+#addMemberBtn:hover { background-color: #1976D2; }
+
+.remove-row-btn {
+  background-color: transparent;
+  color: #c62828;
+  border: 1px solid #c62828;
+  padding: 0.1em 0.45em;
+  font-size: 1em;
+  line-height: 1;
+}
+
+.remove-row-btn:hover {
+  background-color: #c62828;
+  color: white;
 }
 
 #loadProgress {
@@ -58,13 +96,124 @@ button:disabled {
   font-weight: bold;
 }
 
+.find-number-link {
+  font-size: 0.9em;
+  color: #2e7d32;
+  text-decoration: none;
+}
+
+.find-number-link:hover { text-decoration: underline; }
+
+.recent-users {
+  width: 100%;
+  display: none;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+  margin-top: 0.2em;
+}
+
+.recent-users-label {
+  color: #666;
+  font-size: 0.9em;
+  font-weight: normal;
+  margin-right: 0.2em;
+}
+
+.user-chip {
+  background: #e0e0e0;
+  color: #333;
+  border: none;
+  border-radius: 14px;
+  padding: 0.25em 0.2em 0.25em 0.75em;
+  font-size: 0.9em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1em;
+}
+
+.user-chip:hover { background: #d0d0d0; }
+
+.user-chip.active {
+  background: #a5d6a7;
+  color: #1b5e20;
+  cursor: default;
+  font-weight: 600;
+  opacity: 1;
+}
+
+.user-chip.active:hover { background: #a5d6a7; }
+
+.user-chip.used {
+  background: #eeeeee;
+  color: #999;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.user-chip.used:hover { background: #eeeeee; }
+
+.user-chip .chip-name { pointer-events: none; }
+
+.chip-remove {
+  color: #888;
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 0.35em;
+  border-radius: 50%;
+}
+
+.chip-remove:hover {
+  color: #c62828;
+  background: rgba(0,0,0,0.08);
+}
+
 #picker-section {
   margin-top: 1em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+
+.control-row {
   display: flex;
   align-items: center;
   gap: 0.5em;
   flex-wrap: wrap;
+  width: 100%;
 }
+
+.button-group {
+  display: inline-flex;
+  gap: 0.25em;
+}
+
+.button-group button {
+  background-color: #e0e0e0;
+  color: #333;
+  font-size: 0.9em;
+  padding: 0.4em 0.8em;
+}
+
+.button-group button:hover { background-color: #bdbdbd; }
+
+.button-group button.active {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.button-group button.active:hover { background-color: #45a049; }
+
+.reroll-btn {
+  background-color: #9c27b0;
+  font-size: 0.85em;
+  padding: 0.3em 0.8em;
+  white-space: nowrap;
+}
+
+.reroll-btn:hover { background-color: #7b1fa2; }
 
 .toggle-label {
   font-weight: normal;
@@ -148,13 +297,13 @@ button:disabled {
   opacity: 0.4;
 }
 
-#reloadBtn {
+.reload-btn {
   background-color: #ff9800;
   font-size: 0.85em;
   padding: 0.4em 0.8em;
 }
 
-#reloadBtn:hover { background-color: #f57c00; }
+.reload-btn:hover { background-color: #f57c00; }
 
 /* Set action buttons row */
 #set-actions {

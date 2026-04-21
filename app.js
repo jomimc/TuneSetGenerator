@@ -989,9 +989,6 @@
       markTunePlayed(tuneId);
       playedBtn.disabled = true;
       playedBtn.textContent = '\u2714 Done';
-      var card = playedBtn.closest('.tune-card');
-      var reroll = card && card.querySelector('.reroll-btn');
-      if (reroll) reroll.disabled = true;
       updateRhythmDropdown();
       return;
     }

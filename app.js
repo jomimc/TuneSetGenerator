@@ -683,6 +683,13 @@
       onEnd: function (evt) {
         var moved = currentSet.tunes.splice(evt.oldIndex, 1)[0];
         currentSet.tunes.splice(evt.newIndex, 0, moved);
+        list.querySelectorAll('.tune-card').forEach(function (card, newIdx) {
+          card.dataset.idx = newIdx;
+          var rerollBtn = card.querySelector('.reroll-btn');
+          if (rerollBtn) rerollBtn.dataset.idx = newIdx;
+          var playedBtn = card.querySelector('.mark-played-btn');
+          if (playedBtn) playedBtn.dataset.idx = newIdx;
+        });
       }
     });
 

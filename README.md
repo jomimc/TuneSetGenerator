@@ -8,7 +8,7 @@ GitHub Pages.
 
 ## What it does
 
-Pick a set of tunes one of four ways (the **Source** selector):
+Pick a set of tunes one of five ways (the **Source** selector):
 
 - **My tunebook** — random unique tunes from your thesession.org tunebook,
   grouped by rhythm, with Size (2–5) and Key-matching controls. Enter your
@@ -32,6 +32,20 @@ uniformly, so well-known tunes still turn up occasionally even in the larger,
 more adventurous pools. Recorded sets instead
 offer occurrence-count ranges (Recorded once / 2–10 times / 10+ times). Each
 option shows its candidate count on hover.
+
+### Layout & defaults
+
+The controls live in two collapsible sections — **Load tunebooks** and
+**Settings** — both collapsed by default, so a first-time user can just press the
+large **Pick** button and immediately get a set. The defaults (**Popular tunes /
+size 3 / Any keys / Top 1%**) work with no tunebook and no thesession account.
+The **My tunebook** / **My sets** sources stay disabled until a tunebook is
+loaded.
+
+The **Rhythm** selector shows how many sets/tunes are actually available for the
+current settings, updating as you change Size, Keys, Popularity, or "only what I
+know". Your choices (source, size, keys, popularity per source, and the
+collapsed/expanded sections) are remembered between visits.
 
 Tunes render as sheet music (incipits by default, full notation on toggle), are
 drag-reorderable, link to thesession.org, and can be saved, marked played

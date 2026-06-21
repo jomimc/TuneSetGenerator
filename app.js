@@ -833,42 +833,63 @@
     return true;
   }
 
-  // --- Pick a pre-existing set (popular user sets / recorded medleys) ---
-  function pickPopularSet(dataset, src) {
-    var rhythm = rhythmSelect.value;
-
-    // Restrict to the selected popularity option (top-X% slice or count range).
-    var candidates = setsForOption(src, dataset, POP_OPTIONS[src][popIdxBySource[src]]);
-
-    if (rhythm && rhythm !== 'random') {
-      candidates = candidates.filter(function (s) { return s.r === rhythm; });
+  // Sets a source offers under the current popularity/size/key/only-known
+  // settings, EXCLUDING the rhythm filter. Shared by counting and picking so
+  // the dropdown numbers always match what Pick can actually produce.
+  function setCandidates(src) {
+    var base;
+    if (src === 'mysets') {
+      base = (mySetsData || []).slice();
+    } else {
+      var dataset = src === 'usersets' ? userSetsData : recordedSetsData;
+      if (!dataset) return [];
+      base = setsForOption(src, dataset, POP_OPTIONS[src][popIdxBySource[src]]);
     }
-
     var size = effectiveSize();
     if (size !== 'random') {
-      candidates = candidates.filter(function (s) { return s.t.length === size; });
+      base = base.filter(function (s) { return s.t.length === size; });
     }
-
-    // Restrict to fully-known sets when a tunebook is loaded and toggled on.
-    var loaded = getLoadedMembers().length > 0;
-    if (loaded && onlyKnown) {
+    // "Only sets I fully know" applies to the global set sources (not own sets).
+    if (src !== 'mysets' && onlyKnown && getLoadedMembers().length > 0) {
       var known = {};
       tunebook.forEach(function (t) { known[t.id] = true; });
-      candidates = candidates.filter(function (s) {
+      base = base.filter(function (s) {
         return s.t.every(function (id) { return known[id]; });
       });
     }
-
     if (keyMode !== 'any') {
-      candidates = candidates.filter(function (s) { return setMatchesKey(s.t); });
+      base = base.filter(function (s) { return setMatchesKey(s.t); });
     }
+    return base;
+  }
 
+  // Tune ids in the selected poptunes top-X% pool, after the "only known" filter.
+  function poptunesPoolIds() {
+    if (!popularityData || !incipitsData) return [];
+    var sorted = getSortedTuneIds();
+    var opt = POP_OPTIONS.poptunes[popIdxBySource.poptunes];
+    var poolIds = sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
+    if (onlyKnown && getLoadedMembers().length > 0) {
+      var known = {};
+      tunebook.forEach(function (t) { known[t.id] = true; });
+      poolIds = poolIds.filter(function (id) { return known[Number(id)]; });
+    }
+    return poolIds;
+  }
+
+  // --- Pick a pre-existing set (popular user sets / recorded medleys) ---
+  function pickPopularSet(src) {
+    var rhythm = rhythmSelect.value;
+    var candidates = setCandidates(src);
+    if (rhythm && rhythm !== 'random') {
+      candidates = candidates.filter(function (s) { return s.r === rhythm; });
+    }
     if (candidates.length === 0) {
+      var loaded = getLoadedMembers().length > 0;
       throw new Error(loaded && onlyKnown
         ? 'No matching sets are fully in your tunebook. Try unticking "Only sets I fully know", or loosening the rhythm/size/key/popularity.'
         : 'No sets match the current rhythm/size/key/popularity settings.');
     }
-
     var chosen = candidates[Math.floor(Math.random() * candidates.length)];
     return {
       rhythm: chosen.r || 'mixed',
@@ -884,16 +905,9 @@
       throw new Error('No saved sets found. Load a member first — this uses their thesession.org saved sets.');
     }
     var rhythm = rhythmSelect.value;
-    var candidates = mySetsData.slice();
+    var candidates = setCandidates('mysets');
     if (rhythm && rhythm !== 'random') {
       candidates = candidates.filter(function (s) { return s.r === rhythm; });
-    }
-    var size = effectiveSize();
-    if (size !== 'random') {
-      candidates = candidates.filter(function (s) { return s.t.length === size; });
-    }
-    if (keyMode !== 'any') {
-      candidates = candidates.filter(function (s) { return setMatchesKey(s.t); });
     }
     if (candidates.length === 0) {
       throw new Error('None of your saved sets match the current rhythm/size/key settings.');
@@ -909,16 +923,7 @@
   function pickPopularTunes() {
     // Take the top-X% most popular tunes, then group by rhythm type and mode.
     var size = effectiveSize();
-    var sorted = getSortedTuneIds();
-    var opt = POP_OPTIONS.poptunes[popIdxBySource.poptunes];
-    var poolIds = sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
-
-    // "Only tunes I know": restrict to the loaded tunebook.
-    if (onlyKnown && getLoadedMembers().length > 0) {
-      var known = {};
-      tunebook.forEach(function (t) { known[t.id] = true; });
-      poolIds = poolIds.filter(function (id) { return known[Number(id)]; });
-    }
+    var poolIds = poptunesPoolIds();
 
     var byType = {};
     for (var pi = 0; pi < poolIds.length; pi++) {
@@ -986,19 +991,8 @@
     var bucket;
 
     if (source === 'poptunes') {
-      // Build pool the same way pickPopularTunes does
-      var size = effectiveSize();
-      var sorted = getSortedTuneIds();
-      var opt = POP_OPTIONS.poptunes[popIdxBySource.poptunes];
-      var poolIds = sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
-
-      // "Only tunes I know": restrict to the loaded tunebook.
-      if (onlyKnown && getLoadedMembers().length > 0) {
-        var known = {};
-        tunebook.forEach(function (t) { known[t.id] = true; });
-        poolIds = poolIds.filter(function (id) { return known[Number(id)]; });
-      }
-
+      // Build pool the same way pickPopularTunes does.
+      var poolIds = poptunesPoolIds();
       // Filter by rhythm
       bucket = poolIds.filter(function (id) {
         var d = incipitsData[id];
@@ -1047,25 +1041,21 @@
   }
 
   // --- UI: rhythm option counts for the active source ---
+  // Available items per rhythm under the CURRENT settings (size/keys/popularity/
+  // only-known), so the dropdown numbers reflect what Pick can produce.
   function rhythmCounts() {
     var out = {};
     if (source === 'random') {
       var buckets = bucketByRhythm();
       for (var r in buckets) out[r] = buckets[r].length;
-    } else if (source === 'usersets' || source === 'recordings') {
-      var data = source === 'usersets' ? userSetsData : recordedSetsData;
-      if (data) data.forEach(function (s) {
-        if (s.r) out[s.r] = (out[s.r] || 0) + 1;
-      });
     } else if (source === 'poptunes') {
-      if (popularityData && incipitsData) {
-        for (var id in popularityData) {
-          var d = incipitsData[id];
-          if (d && d.type) out[d.type] = (out[d.type] || 0) + 1;
-        }
-      }
-    } else if (source === 'mysets') {
-      (mySetsData || []).forEach(function (s) {
+      poptunesPoolIds().forEach(function (id) {
+        var d = incipitsData[id];
+        if (d && d.type) out[d.type] = (out[d.type] || 0) + 1;
+      });
+    } else {
+      // usersets / recordings / mysets
+      setCandidates(source).forEach(function (s) {
         if (s.r) out[s.r] = (out[s.r] || 0) + 1;
       });
     }
@@ -1184,13 +1174,10 @@
     setDisplay.innerHTML =
       '<div class="set-header"><h3>' + set.rhythm + ' set' + note + '</h3></div>' +
       '<div class="set-controls">' +
-        '<span class="sc-side"></span>' +
         '<label class="full-tune-label"><input type="checkbox" class="full-tune-toggle"' +
           (showFullTunes ? ' checked' : '') + '> Show full tunes</label>' +
-        '<span class="sc-side sc-right">' +
-          '<button class="mark-all-played-btn"' + (setCommitted ? ' disabled' : '') + '>' +
-            '&#10004; Mark All Played</button>' +
-        '</span>' +
+        '<button class="mark-all-played-btn"' + (setCommitted ? ' disabled' : '') + '>' +
+          '&#10004; Mark All Played</button>' +
       '</div>';
 
     var list = document.createElement('div');
@@ -1652,12 +1639,14 @@
       b.classList.toggle('active', b === btn);
     });
     savePrefs();
+    updateRhythmDropdown();
   });
 
   // --- Event: Only-known toggle ---
   onlyKnownToggle.addEventListener('change', function () {
     onlyKnown = onlyKnownToggle.checked;
     savePrefs();
+    updateRhythmDropdown();
   });
 
   // --- Event: Size buttons ---
@@ -1680,6 +1669,7 @@
       b.classList.toggle('active', b === btn);
     });
     savePrefs();
+    updateRhythmDropdown();
   });
 
   // --- Event: Pick set ---
@@ -1693,12 +1683,12 @@
         currentSet = pickSet(rhythmSelect.value);
       } else if (source === 'usersets') {
         await loadUserSets();
-        currentSet = pickPopularSet(userSetsData, 'usersets');
+        currentSet = pickPopularSet('usersets');
         currentSet.note = 'saved by ' + currentSet.popularity +
           ' user' + (currentSet.popularity === 1 ? '' : 's');
       } else if (source === 'recordings') {
         await loadRecordedSets();
-        currentSet = pickPopularSet(recordedSetsData, 'recordings');
+        currentSet = pickPopularSet('recordings');
         currentSet.note = 'recorded ' + currentSet.popularity +
           ' time' + (currentSet.popularity === 1 ? '' : 's');
       } else if (source === 'poptunes') {
@@ -1750,7 +1740,7 @@
     var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
     var hasSaved = savedSets.length > 0;
     chooseSavedBtn.disabled = !hasSaved;
-    downloadSavedBtn.disabled = !hasSaved;
+    if (downloadSavedBtn) downloadSavedBtn.disabled = !hasSaved;
   }
 
   function formatSavedDate(dateStr) {
@@ -1818,8 +1808,8 @@
     if (e.target === savedSetsModal) savedSetsModal.style.display = 'none';
   });
 
-  // --- Event: Download Saved Sets ---
-  downloadSavedBtn.addEventListener('click', function () {
+  // --- Event: Download Saved Sets (button may be absent) ---
+  if (downloadSavedBtn) downloadSavedBtn.addEventListener('click', function () {
     var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
     if (savedSets.length === 0) { alert('No saved sets to download.'); return; }
 

@@ -232,6 +232,14 @@ button:disabled {
   gap: 0.5em;
 }
 
+/* Roomier spacing between the Source / Size / Keys / Popularity rows. */
+#settings-section .section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.3em;
+  width: 100%;
+}
+
 #sourceRow {
   flex-direction: column;
   align-items: flex-start;
@@ -241,7 +249,7 @@ button:disabled {
 .source-tier {
   display: flex;
   align-items: center;
-  gap: 0.5em;
+  gap: 0.6em;
   width: 100%;
 }
 
@@ -367,16 +375,16 @@ button:disabled {
 
 .mark-all-played-btn:hover { background-color: #f57c00; }
 
-/* Row above the first tune: "Show full tunes" centred, "Mark All Played" right
-   (aligned with the per-tune Played buttons via the card's 12px padding). */
+/* Row above the first tune: "Show full tunes" on the left, "Mark All Played" on
+   the right (aligned with the per-tune Played buttons via the 12px padding). */
 .set-controls {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 1em;
   margin: 0.3em 0 0.4em;
+  padding: 0 12px;
 }
-
-.set-controls .sc-side { flex: 1; }
-.set-controls .sc-right { text-align: right; padding-right: 12px; }
 
 .full-tune-label {
   font-size: 0.9em;

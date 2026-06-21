@@ -11,30 +11,40 @@
 
   <div id="tunebook-section">
     <div id="members-list"></div>
-    <button id="addMemberBtn" type="button">+ Playing with a friend? Add a member</button>
+    <button id="addMemberBtn" type="button">+ Playing with a friend? Add a member to see shared tunes</button>
     <div id="loadProgress"></div>
     <div id="tunebookInfo"></div>
   </div>
 
-  <div id="picker-section" style="display:none">
+  <div id="picker-section">
+    <div class="control-row">
+      <label><b>Source:</b></label>
+      <div class="button-group" id="sourceButtons">
+        <button type="button" data-source="random" class="active">My tunebook</button>
+        <button type="button" data-source="mysets">My sets</button>
+        <button type="button" data-source="usersets">Popular sets</button>
+        <button type="button" data-source="recordings">Recorded sets</button>
+        <button type="button" data-source="poptunes">Popular tunes</button>
+      </div>
+    </div>
     <div class="control-row">
       <label for="rhythmSelect"><b>Rhythm:</b></label>
       <select id="rhythmSelect">
         <option value="random">Random</option>
       </select>
       <button id="pickBtn">Pick</button>
-      <label class="toggle-label"><input type="checkbox" id="fullTuneToggle"> Full tunes</label>
     </div>
-    <div class="control-row">
+    <div class="control-row" id="sizeRow">
       <label><b>Size:</b></label>
       <div class="button-group" id="sizeButtons">
+        <button type="button" id="randomSizeBtn" data-size="random" style="display:none">Random</button>
         <button type="button" data-size="2">2</button>
         <button type="button" data-size="3" class="active">3</button>
         <button type="button" data-size="4">4</button>
         <button type="button" data-size="5">5</button>
       </div>
     </div>
-    <div class="control-row">
+    <div class="control-row" id="keyRow">
       <label><b>Keys:</b></label>
       <div class="button-group" id="keyButtons">
         <button type="button" data-key="any" class="active">Any</button>
@@ -42,9 +52,15 @@
         <button type="button" data-key="different">All Different</button>
       </div>
     </div>
+    <div class="control-row" id="popularityRow" style="display:none">
+      <label><b>Popularity:</b></label>
+      <div class="button-group" id="popularityButtons"></div>
+    </div>
+    <div class="control-row" id="knownRow" style="display:none">
+      <label class="toggle-label"><input type="checkbox" id="onlyKnownToggle" checked> Only <span id="knownNoun">sets I fully know</span></label>
+    </div>
     <div id="set-actions">
       <button id="saveBtn" disabled>Save Set</button>
-      <button id="playedSetBtn" disabled>Played Set (Don't Save)</button>
       <button id="chooseSavedBtn" disabled>Choose from Saved Sets</button>
       <button id="downloadSavedBtn" disabled>Download Saved Sets</button>
     </div>
@@ -57,6 +73,28 @@
       <h3>Saved Sets</h3>
       <div id="saved-sets-list"></div>
       <button id="closeSavedModal">Close</button>
+    </div>
+  </div>
+
+  <div id="location-modal">
+    <div id="location-modal-content">
+      <h3>Find a member</h3>
+      <p class="modal-hint">Search thesession.org by name or location, then pick yourself (or a friend) to load that tunebook.</p>
+      <div class="loc-search-row">
+        <input id="memberNameInput" type="text" placeholder="Name on thesession.org, e.g. Jeremy">
+        <button id="memberNameSearchBtn" type="button">Search by name</button>
+      </div>
+      <div class="loc-search-row">
+        <input id="locationPlaceInput" type="text" placeholder="Town or place, e.g. Doolin">
+        <button id="locationSearchBtn" type="button">Search by place</button>
+        <button id="locationGeoBtn" type="button" title="Use your current location">Use my location</button>
+      </div>
+      <input id="locationNameFilter" type="text" placeholder="Filter these results by name…" style="display:none">
+      <div id="locationStatus"></div>
+      <div id="location-results"></div>
+      <button id="locationMore" type="button" style="display:none">Load more</button>
+      <button id="closeLocationModal" type="button">Close</button>
+      <p class="modal-credit">Place search &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors.</p>
     </div>
   </div>
 

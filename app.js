@@ -11,8 +11,53 @@
   var incipitsData = null;   // combined incipits.json, keyed by tune_id string
   var tuneChunks = {};       // cached full-tune chunks, keyed by chunk number
   var showFullTunes = false;
-  var setSize = 3;           // number of tunes per set (2–5)
+  // Size memory: a numeric size (all sources) plus an "any/random" override that
+  // only applies to sources offering it (pre-existing sets). Both persist across
+  // source switches, like keyMode does.
+  var sizeNumeric = 3;       // 2–5
+  var sizeAny = false;       // "Random" size chosen (pre-existing-set sources)
   var keyMode = 'any';       // 'any' | 'same' | 'different'
+  var setCommitted = false;  // true once the current set is saved / all-played
+
+  // Set source: 'random' (tunebook), 'mysets', 'usersets', 'recordings', 'poptunes'
+  var source = 'random';
+  var onlyKnown = true;      // set modes: restrict to fully-known sets
+
+  // Lazily loaded popularity datasets (see preprocess.py)
+  var popularityData = null; // { tune_id: tunebook_count }
+  var userSetsData = null;   // [ { t:[ids], n:count, r:rhythm } ]
+  var recordedSetsData = null;
+
+  // Cached popularity-sorted views, built on demand for rank-based "Top X%".
+  var sortedTuneIds = null;          // tune ids (with a rhythm) by adds, desc
+  var sortedSetsCache = {};          // source -> sets sorted by count, desc
+
+  // Popularity options per source. "Top X%" is rank-based (the X% most popular
+  // items); recordings use explicit occurrence-count ranges.
+  var POP_OPTIONS = {
+    poptunes: [
+      { label: 'Top 50%', pct: 50 }, { label: 'Top 25%', pct: 25 },
+      { label: 'Top 10%', pct: 10 }, { label: 'Top 5%', pct: 5 },
+      { label: 'Top 1%', pct: 1 }
+    ],
+    usersets: [
+      { label: 'Any', pct: 100 }, { label: 'Top 40%', pct: 40 },
+      { label: 'Top 10%', pct: 10 }, { label: 'Top 5%', pct: 5 },
+      { label: 'Top 1%', pct: 1 }
+    ],
+    recordings: [
+      { label: 'Recorded once', min: 1, max: 1 },
+      { label: 'Recorded 2–10 times', min: 2, max: 10 },
+      { label: 'Recorded 10+ times', min: 11, max: Infinity }
+    ]
+  };
+  var POP_DEFAULT = { poptunes: 1, usersets: 1, recordings: 1 };
+  // Each popularity source remembers its own selected option.
+  var popIdxBySource = {
+    poptunes: POP_DEFAULT.poptunes,
+    usersets: POP_DEFAULT.usersets,
+    recordings: POP_DEFAULT.recordings
+  };
 
   var CHUNK_SIZE = 1000;
 
@@ -31,16 +76,33 @@
   var rhythmSelect = document.getElementById('rhythmSelect');
   var pickBtn = document.getElementById('pickBtn');
   var saveBtn = document.getElementById('saveBtn');
-  var playedSetBtn = document.getElementById('playedSetBtn');
   var chooseSavedBtn = document.getElementById('chooseSavedBtn');
   var downloadSavedBtn = document.getElementById('downloadSavedBtn');
   var setDisplay = document.getElementById('set-display');
-  var fullTuneToggle = document.getElementById('fullTuneToggle');
+  var sourceButtons = document.getElementById('sourceButtons');
   var sizeButtons = document.getElementById('sizeButtons');
+  var randomSizeBtn = document.getElementById('randomSizeBtn');
   var keyButtons = document.getElementById('keyButtons');
+  var popularityButtons = document.getElementById('popularityButtons');
+  var popularityRow = document.getElementById('popularityRow');
+  var knownRow = document.getElementById('knownRow');
+  var knownNoun = document.getElementById('knownNoun');
+  var onlyKnownToggle = document.getElementById('onlyKnownToggle');
   var savedSetsModal = document.getElementById('saved-sets-modal');
   var savedSetsList = document.getElementById('saved-sets-list');
   var closeSavedModal = document.getElementById('closeSavedModal');
+
+  var locationModal = document.getElementById('location-modal');
+  var memberNameInput = document.getElementById('memberNameInput');
+  var memberNameSearchBtn = document.getElementById('memberNameSearchBtn');
+  var locationPlaceInput = document.getElementById('locationPlaceInput');
+  var locationSearchBtn = document.getElementById('locationSearchBtn');
+  var locationGeoBtn = document.getElementById('locationGeoBtn');
+  var locationNameFilter = document.getElementById('locationNameFilter');
+  var locationStatus = document.getElementById('locationStatus');
+  var locationResults = document.getElementById('location-results');
+  var locationMore = document.getElementById('locationMore');
+  var closeLocationModal = document.getElementById('closeLocationModal');
 
   var PLAYED_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
   var MAX_RECENT_USERS = 8;
@@ -60,6 +122,21 @@
       var tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
     }
     return shuffled.slice(0, count);
+  }
+
+  // --- Picker preferences (cached in localStorage; stable across sessions) ---
+  function savePrefs() {
+    try {
+      localStorage.setItem('pickerPrefs', JSON.stringify({
+        source: source, sizeNumeric: sizeNumeric, sizeAny: sizeAny,
+        keyMode: keyMode, onlyKnown: onlyKnown, showFull: showFullTunes,
+        popIdx: popIdxBySource
+      }));
+    } catch (e) { /* ignore quota/availability errors */ }
+  }
+  function loadPrefs() {
+    try { return JSON.parse(localStorage.getItem('pickerPrefs') || '{}'); }
+    catch (e) { return {}; }
   }
 
   // --- Recent users ---
@@ -171,13 +248,13 @@
     reloadBtn.style.display = 'none';
     row.appendChild(reloadBtn);
 
-    var link = document.createElement('a');
-    link.className = 'find-number-link';
-    link.href = 'https://thesession.org/members';
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = "Don't know your number?";
-    row.appendChild(link);
+    var help = document.createElement('span');
+    help.className = 'find-number';
+    help.innerHTML =
+      "Don't know your number? " +
+      '<button type="button" class="find-name-btn">Search by name</button>' +
+      ' or <button type="button" class="find-location-btn">Search by location</button>';
+    row.appendChild(help);
 
     if (rowIndex > 0) {
       var removeBtn = document.createElement('button');
@@ -211,14 +288,17 @@
     updateMemberIdentity();
     renderAllRecentUsers();
     updateTunebookInfo();
+    mySetsMemberId = null; // primary member may have changed
+    updateControlVisibility();
     if (getLoadedMembers().length > 0) {
       cleanPlayedMap();
-      updateRhythmDropdown();
+      if (source === 'mysets') applySource(); else updateRhythmDropdown();
       updateSavedSetsButtons();
     } else {
-      pickerSection.style.display = 'none';
       setDisplay.innerHTML = '';
       currentSet = null;
+      mySetsData = [];
+      updateRhythmDropdown();
     }
   }
 
@@ -319,6 +399,116 @@
     var resp = await fetch('data/incipits.json');
     if (!resp.ok) throw new Error('Failed to load incipits data');
     incipitsData = await resp.json();
+  }
+
+  // Load a popularity/set dataset once, cache in memory
+  async function loadJSON(path) {
+    var resp = await fetch(path);
+    if (!resp.ok) throw new Error('Failed to load ' + path);
+    return resp.json();
+  }
+  async function loadPopularity() {
+    if (!popularityData) popularityData = await loadJSON('data/popularity.json');
+    return popularityData;
+  }
+  async function loadUserSets() {
+    if (!userSetsData) userSetsData = await loadJSON('data/user_sets.json');
+    return userSetsData;
+  }
+  async function loadRecordedSets() {
+    if (!recordedSetsData) recordedSetsData = await loadJSON('data/recorded_sets.json');
+    return recordedSetsData;
+  }
+
+  // A member's own saved sets, fetched from thesession.org and cached in IndexedDB.
+  var mySetsData = null;       // [ { t:[ids], r:rhythm, name } ] for the primary member
+  var mySetsMemberId = null;
+
+  async function fetchMemberSets(mid) {
+    var base = 'https://thesession.org/members/' + mid + '/sets?format=json&perpage=50&page=';
+    var first = await (await fetch(base + '1')).json();
+    var raw = (first.sets || []).slice();
+    if (first.pages > 1) {
+      var proms = [];
+      for (var p = 2; p <= first.pages; p++) {
+        proms.push(fetch(base + p).then(function (r) { return r.json(); }));
+      }
+      (await Promise.all(proms)).forEach(function (r) {
+        raw.push.apply(raw, r.sets || []);
+      });
+    }
+    return raw;
+  }
+
+  function parseMemberSets(rawSets) {
+    return (rawSets || []).map(function (s) {
+      var ids = (s.settings || []).map(function (st) {
+        var m = /tunes\/(\d+)/.exec(st.url || '');
+        return m ? Number(m[1]) : null;
+      }).filter(Boolean);
+      var r = (s.settings && s.settings[0] && s.settings[0].type) || '';
+      return { t: ids, r: r, name: s.name || '' };
+    }).filter(function (s) { return s.t.length >= 2; });
+  }
+
+  async function ensureMySets() {
+    var primary = getLoadedMembers()[0];
+    if (!primary) { mySetsData = []; mySetsMemberId = null; return; }
+    if (mySetsMemberId === primary.id && mySetsData) return;
+    var cached = await dbGet('mysets:' + primary.id);
+    if (!cached) {
+      cached = await fetchMemberSets(primary.id);
+      await dbSet('mysets:' + primary.id, cached);
+    }
+    mySetsData = parseMemberSets(cached);
+    mySetsMemberId = primary.id;
+  }
+  // Random index proportional to weights (used to favour larger rhythm pools).
+  function pickWeightedIndex(weights) {
+    var total = 0;
+    for (var i = 0; i < weights.length; i++) total += weights[i];
+    if (total <= 0) return Math.floor(Math.random() * weights.length);
+    var r = Math.random() * total;
+    for (var j = 0; j < weights.length; j++) {
+      r -= weights[j];
+      if (r <= 0) return j;
+    }
+    return weights.length - 1;
+  }
+
+  // --- Popularity options ("Top X%" rank cutoffs / recording-count ranges) ---
+  function getSortedTuneIds() {
+    if (sortedTuneIds) return sortedTuneIds;
+    var ids = [];
+    for (var id in popularityData) {
+      if (incipitsData && incipitsData[id] && incipitsData[id].type) ids.push(id);
+    }
+    ids.sort(function (a, b) { return popularityData[b] - popularityData[a]; });
+    sortedTuneIds = ids;
+    return ids;
+  }
+  function getSortedSets(src, dataset) {
+    if (!sortedSetsCache[src]) {
+      sortedSetsCache[src] = dataset.slice().sort(function (a, b) { return b.n - a.n; });
+    }
+    return sortedSetsCache[src];
+  }
+  // Number of candidate items an option yields (before rhythm/key/size filters).
+  function optionPopulation(src, opt) {
+    if (src === 'poptunes') return Math.ceil(opt.pct / 100 * getSortedTuneIds().length);
+    var dataset = src === 'usersets' ? userSetsData : recordedSetsData;
+    if (opt.pct != null) return Math.ceil(opt.pct / 100 * dataset.length);
+    return dataset.filter(function (s) {
+      return s.n >= opt.min && s.n <= opt.max;
+    }).length;
+  }
+  // The set objects an option admits (top-X% slice, or count range).
+  function setsForOption(src, dataset, opt) {
+    if (opt.pct != null) {
+      var sorted = getSortedSets(src, dataset);
+      return sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
+    }
+    return dataset.filter(function (s) { return s.n >= opt.min && s.n <= opt.max; });
   }
 
   // Load a full-tune chunk on demand, cache in memory
@@ -546,10 +736,11 @@
   // --- Set picking ---
   function pickSet(selectedRhythm) {
     var buckets = bucketByRhythm();
+    var size = effectiveSize();
 
     var weightedRhythms = [];
     for (var r in buckets) {
-      if (rhythmEligible(buckets[r], setSize, keyMode)) {
+      if (rhythmEligible(buckets[r], size, keyMode)) {
         for (var w = 0; w < buckets[r].length; w++) weightedRhythms.push(r);
       }
     }
@@ -563,14 +754,196 @@
       chosenRhythm = weightedRhythms[Math.floor(Math.random() * weightedRhythms.length)];
     } else {
       chosenRhythm = selectedRhythm;
-      if (!buckets[chosenRhythm] || !rhythmEligible(buckets[chosenRhythm], setSize, keyMode)) {
+      if (!buckets[chosenRhythm] || !rhythmEligible(buckets[chosenRhythm], size, keyMode)) {
         throw new Error('Not enough playable tunes for "' + chosenRhythm + '" with current settings.');
       }
     }
 
-    var selected = pickFromBucket(buckets[chosenRhythm], setSize, keyMode);
+    var selected = pickFromBucket(buckets[chosenRhythm], size, keyMode);
     if (!selected) throw new Error('Could not pick a set with current settings.');
     return { rhythm: chosenRhythm, tunes: selected };
+  }
+
+  // Build a set-display tune object from a tune id, using incipit metadata.
+  function tuneFromId(id) {
+    var d = (incipitsData && incipitsData[String(id)]) || {};
+    return {
+      id: id,
+      name: d.name || ('Tune #' + id),
+      type: d.type || '',
+      url: 'https://thesession.org/tunes/' + id,
+      mode: d.mode || ''
+    };
+  }
+
+  // Mode (key) of a tune id, from incipit metadata.
+  function tuneMode(id) {
+    var d = incipitsData && incipitsData[String(id)];
+    return d ? d.mode : null;
+  }
+
+  // Does a set's tunes satisfy the current key mode?
+  function setMatchesKey(ids) {
+    if (keyMode === 'any') return true;
+    var modes = ids.map(tuneMode);
+    if (modes.some(function (m) { return !m; })) return false; // unknown key
+    if (keyMode === 'same') {
+      return modes.every(function (m) { return m === modes[0]; });
+    }
+    // 'different'
+    var seen = {};
+    for (var i = 0; i < modes.length; i++) {
+      if (seen[modes[i]]) return false;
+      seen[modes[i]] = true;
+    }
+    return true;
+  }
+
+  // --- Pick a pre-existing set (popular user sets / recorded medleys) ---
+  function pickPopularSet(dataset, src) {
+    var rhythm = rhythmSelect.value;
+
+    // Restrict to the selected popularity option (top-X% slice or count range).
+    var candidates = setsForOption(src, dataset, POP_OPTIONS[src][popIdxBySource[src]]);
+
+    if (rhythm && rhythm !== 'random') {
+      candidates = candidates.filter(function (s) { return s.r === rhythm; });
+    }
+
+    var size = effectiveSize();
+    if (size !== 'random') {
+      candidates = candidates.filter(function (s) { return s.t.length === size; });
+    }
+
+    // Restrict to fully-known sets when a tunebook is loaded and toggled on.
+    var loaded = getLoadedMembers().length > 0;
+    if (loaded && onlyKnown) {
+      var known = {};
+      tunebook.forEach(function (t) { known[t.id] = true; });
+      candidates = candidates.filter(function (s) {
+        return s.t.every(function (id) { return known[id]; });
+      });
+    }
+
+    if (keyMode !== 'any') {
+      candidates = candidates.filter(function (s) { return setMatchesKey(s.t); });
+    }
+
+    if (candidates.length === 0) {
+      throw new Error(loaded && onlyKnown
+        ? 'No matching sets are fully in your tunebook. Try unticking "Only sets I fully know", or loosening the rhythm/size/key/popularity.'
+        : 'No sets match the current rhythm/size/key/popularity settings.');
+    }
+
+    var chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    return {
+      rhythm: chosen.r || 'mixed',
+      popularity: chosen.n,
+      recs: chosen.recs,
+      tunes: chosen.t.map(tuneFromId)
+    };
+  }
+
+  // --- Pick from the loaded member's own thesession.org saved sets ---
+  function pickMySet() {
+    if (!mySetsData || mySetsData.length === 0) {
+      throw new Error('No saved sets found. Load a member first — this uses their thesession.org saved sets.');
+    }
+    var rhythm = rhythmSelect.value;
+    var candidates = mySetsData.slice();
+    if (rhythm && rhythm !== 'random') {
+      candidates = candidates.filter(function (s) { return s.r === rhythm; });
+    }
+    var size = effectiveSize();
+    if (size !== 'random') {
+      candidates = candidates.filter(function (s) { return s.t.length === size; });
+    }
+    if (keyMode !== 'any') {
+      candidates = candidates.filter(function (s) { return setMatchesKey(s.t); });
+    }
+    if (candidates.length === 0) {
+      throw new Error('None of your saved sets match the current rhythm/size/key settings.');
+    }
+    var chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    return {
+      rhythm: chosen.r || 'mixed',
+      tunes: chosen.t.map(tuneFromId)
+    };
+  }
+
+  // --- Pick a fresh set of popular tunes from the selected top-X% pool ---
+  function pickPopularTunes() {
+    // Take the top-X% most popular tunes, then group by rhythm type and mode.
+    var size = effectiveSize();
+    var sorted = getSortedTuneIds();
+    var opt = POP_OPTIONS.poptunes[popIdxBySource.poptunes];
+    var poolIds = sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
+
+    // "Only tunes I know": restrict to the loaded tunebook.
+    if (onlyKnown && getLoadedMembers().length > 0) {
+      var known = {};
+      tunebook.forEach(function (t) { known[t.id] = true; });
+      poolIds = poolIds.filter(function (id) { return known[Number(id)]; });
+    }
+
+    var byType = {};
+    for (var pi = 0; pi < poolIds.length; pi++) {
+      var id = poolIds[pi];
+      var d = incipitsData[id];
+      if (!byType[d.type]) byType[d.type] = { all: [], byMode: {} };
+      byType[d.type].all.push(id);
+      if (d.mode) {
+        if (!byType[d.type].byMode[d.mode]) byType[d.type].byMode[d.mode] = [];
+        byType[d.type].byMode[d.mode].push(id);
+      }
+    }
+
+    // A type can yield a set under the current key mode if...
+    function typeEligible(g) {
+      if (keyMode === 'any') return g.all.length >= size;
+      if (keyMode === 'same') {
+        return Object.keys(g.byMode).some(function (m) {
+          return g.byMode[m].length >= size;
+        });
+      }
+      return Object.keys(g.byMode).length >= size; // 'different'
+    }
+
+    var rhythm = rhythmSelect.value;
+    var chosenType;
+    if (!rhythm || rhythm === 'random') {
+      var eligible = Object.keys(byType).filter(function (t) {
+        return typeEligible(byType[t]);
+      });
+      if (eligible.length === 0) throw new Error('Not enough tunes for the current size/key/popularity settings.');
+      chosenType = eligible[pickWeightedIndex(
+        eligible.map(function (t) { return byType[t].all.length; }))];
+    } else {
+      chosenType = rhythm;
+      if (!byType[chosenType] || !typeEligible(byType[chosenType])) {
+        throw new Error('Not enough "' + chosenType + '" tunes for the current size/key/popularity settings.');
+      }
+    }
+
+    var g = byType[chosenType];
+    var ids;
+    if (keyMode === 'same') {
+      var modes = Object.keys(g.byMode).filter(function (m) {
+        return g.byMode[m].length >= size;
+      });
+      var chosenMode = modes[pickWeightedIndex(
+        modes.map(function (m) { return g.byMode[m].length; }))];
+      ids = pickRandomUnique(g.byMode[chosenMode], size);
+    } else if (keyMode === 'different') {
+      // `size` distinct modes, then one random tune from each.
+      var pickedModes = pickRandomUnique(Object.keys(g.byMode), size);
+      ids = pickedModes.map(function (m) {
+        return g.byMode[m][Math.floor(Math.random() * g.byMode[m].length)];
+      });
+    } else {
+      ids = pickRandomUnique(g.all, size);
+    }
+    return { rhythm: chosenType, tunes: ids.map(tuneFromId) };
   }
 
   // --- Reroll a single tune within the current set ---
@@ -612,20 +985,49 @@
     renderSet(currentSet);
   }
 
+  // --- UI: rhythm option counts for the active source ---
+  function rhythmCounts() {
+    var out = {};
+    if (source === 'random') {
+      var buckets = bucketByRhythm();
+      for (var r in buckets) out[r] = buckets[r].length;
+    } else if (source === 'usersets' || source === 'recordings') {
+      var data = source === 'usersets' ? userSetsData : recordedSetsData;
+      if (data) data.forEach(function (s) {
+        if (s.r) out[s.r] = (out[s.r] || 0) + 1;
+      });
+    } else if (source === 'poptunes') {
+      if (popularityData && incipitsData) {
+        for (var id in popularityData) {
+          var d = incipitsData[id];
+          if (d && d.type) out[d.type] = (out[d.type] || 0) + 1;
+        }
+      }
+    } else if (source === 'mysets') {
+      (mySetsData || []).forEach(function (s) {
+        if (s.r) out[s.r] = (out[s.r] || 0) + 1;
+      });
+    }
+    return out;
+  }
+
   // --- UI: populate rhythm dropdown ---
   function updateRhythmDropdown() {
-    var buckets = bucketByRhythm();
+    var counts = rhythmCounts();
     var prev = rhythmSelect.value;
     rhythmSelect.innerHTML = '<option value="random">Random</option>';
 
-    var types = Object.keys(buckets).sort();
+    // Pre-existing sets are not gated by size; tune modes need >= size candidates.
+    var min = isPreExisting(source) ? 1 : effectiveSize();
+
+    var types = Object.keys(counts).sort();
     for (var i = 0; i < types.length; i++) {
       var type = types[i];
-      var count = buckets[type].length;
+      var count = counts[type];
       var opt = document.createElement('option');
       opt.value = type;
       opt.textContent = type.charAt(0).toUpperCase() + type.slice(1) + ' (' + count + ')';
-      if (count < setSize) opt.disabled = true;
+      if (count < min) opt.disabled = true;
       rhythmSelect.appendChild(opt);
     }
 
@@ -636,9 +1038,88 @@
     if (prev && stillPickable) rhythmSelect.value = prev;
   }
 
+  // Effective size for the active source: pre-existing-set sources may use the
+  // "random" (any-length) override; everything else uses the numeric size.
+  function effectiveSize() {
+    return (isPreExisting(source) && sizeAny) ? 'random' : sizeNumeric;
+  }
+
+  // --- UI: reflect the effective size in the size button group ---
+  function updateSizeButtons() {
+    var eff = String(effectiveSize());
+    sizeButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.size === eff);
+    });
+  }
+
+  // Sources whose sets are pre-existing (variable length, no reroll).
+  function isPreExisting(src) {
+    return src === 'usersets' || src === 'recordings' || src === 'mysets';
+  }
+
+  // --- UI: show/hide control rows for the active source ---
+  function updateControlVisibility() {
+    var loaded = getLoadedMembers().length > 0;
+    // Size and Keys apply to every source; pre-existing sets also offer "Random" size.
+    randomSizeBtn.style.display = isPreExisting(source) ? '' : 'none';
+    popularityRow.style.display = POP_OPTIONS[source] ? '' : 'none';
+    // "Only what I know" applies to popular/recorded sets and popular tunes.
+    var showKnown = loaded &&
+      (source === 'usersets' || source === 'recordings' || source === 'poptunes');
+    knownRow.style.display = showKnown ? '' : 'none';
+    knownNoun.textContent = (source === 'poptunes') ? 'tunes I know' : 'sets I fully know';
+  }
+
+  // --- UI: render the popularity options for the active source ---
+  function renderPopularityButtons() {
+    popularityButtons.innerHTML = '';
+    if (!POP_OPTIONS[source]) return;
+    var opts = POP_OPTIONS[source];
+    var unit = source === 'poptunes' ? 'tunes'
+      : (source === 'recordings' ? 'medleys' : 'sets');
+    opts.forEach(function (o, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.idx = String(i);
+      b.textContent = o.label;
+      var n = optionPopulation(source, o);
+      b.title = '≈' + n.toLocaleString() + ' ' + unit;
+      if (n === 0) b.disabled = true;
+      if (i === popIdxBySource[source]) b.classList.add('active');
+      popularityButtons.appendChild(b);
+    });
+  }
+
+  // --- Switch source: load needed data, refresh controls ---
+  async function applySource() {
+    updateControlVisibility();
+    try {
+      if (source === 'usersets') await loadUserSets();
+      else if (source === 'recordings') await loadRecordedSets();
+      else if (source === 'poptunes') { await loadPopularity(); await loadIncipitsData(); }
+      else if (source === 'mysets') { await loadIncipitsData(); await ensureMySets(); }
+    } catch (e) {
+      alert('Could not load data for this source: ' + e.message);
+    }
+    updateSizeButtons();
+    renderPopularityButtons();
+    updateRhythmDropdown();
+  }
+
   // --- UI: render set ---
   async function renderSet(set) {
-    setDisplay.innerHTML = '<h3>' + set.rhythm + ' set</h3>';
+    var note = set.note ? ' <span class="set-note">' + set.note + '</span>' : '';
+    setDisplay.innerHTML =
+      '<div class="set-header"><h3>' + set.rhythm + ' set' + note + '</h3></div>' +
+      '<div class="set-controls">' +
+        '<span class="sc-side"></span>' +
+        '<label class="full-tune-label"><input type="checkbox" class="full-tune-toggle"' +
+          (showFullTunes ? ' checked' : '') + '> Show full tunes</label>' +
+        '<span class="sc-side sc-right">' +
+          '<button class="mark-all-played-btn"' + (setCommitted ? ' disabled' : '') + '>' +
+            '&#10004; Mark All Played</button>' +
+        '</span>' +
+      '</div>';
 
     var list = document.createElement('div');
     list.id = 'tuneList';
@@ -650,6 +1131,13 @@
       card.className = 'tune-card';
       card.dataset.idx = i;
 
+      var dis = setCommitted ? ' disabled' : '';
+      // Reroll only makes sense for tunebook-random sets; pre-existing
+      // (popular/recorded) sets are shown intact.
+      var rerollHtml = (source === 'random')
+        ? '<button class="reroll-btn" data-idx="' + i + '"' + dis + ' title="Replace with a new random tune">&#8634; Reroll</button>'
+        : '';
+
       var header = document.createElement('div');
       header.className = 'tune-header';
       header.innerHTML =
@@ -658,9 +1146,8 @@
           '<a href="' + tune.url + '" target="_blank">' + tune.name + '</a>' +
           '<span class="tune-key" id="key-' + i + '"></span>' +
         '</span>' +
-        '<button class="reroll-btn" data-idx="' + i + '" title="Replace with a new random tune">' +
-          '&#8634; Reroll</button>' +
-        '<button class="mark-played-btn" data-tune-id="' + tune.id + '" data-idx="' + i + '">' +
+        rerollHtml +
+        '<button class="mark-played-btn" data-tune-id="' + tune.id + '" data-idx="' + i + '"' + dis + '>' +
           '&#10004; Played</button>';
       card.appendChild(header);
 
@@ -692,6 +1179,17 @@
         });
       }
     });
+
+    // Recording details (bonus, for recorded sets only).
+    if (set.recs && set.recs.length) {
+      var rec = document.createElement('div');
+      rec.className = 'rec-details';
+      var label = document.createElement('strong');
+      label.textContent = 'Recorded on: ';
+      rec.appendChild(label);
+      rec.appendChild(document.createTextNode(set.recs.join(' · ')));
+      setDisplay.appendChild(rec);
+    }
 
     // Look up tune data and render ABC
     var promises = set.tunes.map(function (tune, idx) {
@@ -764,7 +1262,9 @@
       updateTunebookInfo();
       rowReloadBtn.style.display = result.fromCache ? '' : 'none';
       renderAllRecentUsers();
-      updateRhythmDropdown();
+      mySetsMemberId = null; // primary member may have changed
+      updateControlVisibility();
+      if (source === 'mysets') applySource(); else updateRhythmDropdown();
       updateSavedSetsButtons();
       pickerSection.style.display = '';
     } catch (e) {
@@ -802,6 +1302,14 @@
       removeMemberRow(rowIndex);
       return;
     }
+    if (e.target.closest('.find-name-btn')) {
+      openLocationModal(rowIndex, 'name');
+      return;
+    }
+    if (e.target.closest('.find-location-btn')) {
+      openLocationModal(rowIndex, 'place');
+      return;
+    }
 
     var chip = e.target.closest('.user-chip');
     if (chip && !chip.disabled) {
@@ -812,18 +1320,253 @@
 
   addMemberBtn.addEventListener('click', function () { addMemberRow(); });
 
+  // --- Find a member by name or location (thesession.org + OSM geocoding) ---
+  var locationRowIndex = null;
+  // { label, fetchPage(page)->Promise, lat, lon (optional), page, pages, members:[] }
+  var locSearch = null;
+
+  function openLocationModal(rowIndex, focusMode) {
+    locationRowIndex = rowIndex;
+    locSearch = null;
+    locationResults.innerHTML = '';
+    locationStatus.textContent = '';
+    locationNameFilter.value = '';
+    locationNameFilter.style.display = 'none';
+    locationMore.style.display = 'none';
+    locationModal.style.display = 'flex';
+    (focusMode === 'name' ? memberNameInput : locationPlaceInput).focus();
+  }
+
+  function closeLocation() { locationModal.style.display = 'none'; }
+
+  // Distance in km between two lat/lon points (haversine).
+  function distanceKm(lat1, lon1, lat2, lon2) {
+    var R = 6371, toRad = Math.PI / 180;
+    var dLat = (lat2 - lat1) * toRad, dLon = (lon2 - lon1) * toRad;
+    var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // Geocode a place name to {lat, lon, label} via OpenStreetMap Nominatim.
+  async function geocode(place) {
+    var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' +
+      encodeURIComponent(place);
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('Geocoding failed (' + resp.status + ')');
+    var data = await resp.json();
+    if (!data.length) throw new Error('No place found for "' + place + '".');
+    return {
+      lat: parseFloat(data[0].lat),
+      lon: parseFloat(data[0].lon),
+      label: data[0].display_name
+    };
+  }
+
+  // Reverse-geocode lat/lon to a human place name (sanity check for "my location").
+  async function reverseGeocode(lat, lon) {
+    try {
+      var url = 'https://nominatim.openstreetmap.org/reverse?format=json&zoom=10&lat=' +
+        lat + '&lon=' + lon;
+      var data = await (await fetch(url)).json();
+      return data.display_name || (lat.toFixed(3) + ', ' + lon.toFixed(3));
+    } catch (e) {
+      return lat.toFixed(3) + ', ' + lon.toFixed(3);
+    }
+  }
+
+  async function fetchJSON(url) {
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('Member search failed (' + resp.status + ')');
+    return resp.json();
+  }
+  function fetchNearbyPage(lat, lon, page) {
+    return fetchJSON('https://thesession.org/members/nearby?format=json&page=' + page +
+      '&latlon=' + lat + ',' + lon);
+  }
+  function fetchNamePage(name, page) {
+    return fetchJSON('https://thesession.org/members/search?format=json&perpage=10&page=' +
+      page + '&q=' + encodeURIComponent(name));
+  }
+
+  // Begin a search. `opts`: { label, fetchPage(page), lat?, lon? }.
+  async function startSearch(opts) {
+    locSearch = {
+      label: opts.label, fetchPage: opts.fetchPage,
+      lat: opts.lat, lon: opts.lon, page: 0, pages: 1, members: []
+    };
+    locationResults.innerHTML = '';
+    locationNameFilter.style.display = 'none';
+    locationMore.style.display = 'none';
+    await loadNextLocationPage();
+  }
+
+  async function loadNextLocationPage() {
+    if (!locSearch) return;
+    locationStatus.textContent = 'Searching ' + locSearch.label + '…';
+    try {
+      var data = await locSearch.fetchPage(locSearch.page + 1);
+      locSearch.page = data.page;
+      locSearch.pages = data.pages;
+      locSearch.members = locSearch.members.concat(data.members || []);
+      if (locSearch.members.length === 0) {
+        locationStatus.textContent = 'No members found for ' + locSearch.label + '.';
+        return;
+      }
+      locationStatus.textContent = data.total + ' member' + (data.total === 1 ? '' : 's') +
+        ' for ' + locSearch.label + '. Pick yourself or a friend:';
+      locationNameFilter.style.display = '';
+      renderLocationResults();
+    } catch (e) {
+      locationStatus.textContent = e.message;
+    }
+  }
+
+  function renderLocationResults() {
+    var filter = locationNameFilter.value.trim().toLowerCase();
+    locationResults.innerHTML = '';
+    var shown = 0;
+    locSearch.members.forEach(function (m) {
+      if (filter && m.name.toLowerCase().indexOf(filter) === -1) return;
+      shown++;
+      var item = document.createElement('div');
+      item.className = 'location-result';
+      item.dataset.id = m.id;
+
+      var dist = '';
+      if (locSearch.lat != null && m.location && m.location.latitude) {
+        var km = distanceKm(locSearch.lat, locSearch.lon,
+          parseFloat(m.location.latitude), parseFloat(m.location.longitude));
+        dist = ' — ' + (km < 10 ? km.toFixed(1) : Math.round(km)) + ' km';
+      }
+      var bio = m.bio ? m.bio.trim().replace(/\s+/g, ' ').slice(0, 90) : '';
+
+      item.innerHTML =
+        '<span class="loc-name">' + m.name + '</span>' +
+        '<span class="loc-meta">#' + m.id + dist + '</span>' +
+        (bio ? '<span class="loc-bio">' + bio + '</span>' : '');
+      locationResults.appendChild(item);
+    });
+
+    if (shown === 0) {
+      locationResults.innerHTML = '<div class="location-empty">No loaded results match "' +
+        filter + '". Try Load more.</div>';
+    }
+    locationMore.style.display = (locSearch.page < locSearch.pages) ? '' : 'none';
+  }
+
+  memberNameSearchBtn.addEventListener('click', function () {
+    var name = memberNameInput.value.trim();
+    if (!name) { memberNameInput.focus(); return; }
+    startSearch({
+      label: 'name "' + name + '"',
+      fetchPage: function (p) { return fetchNamePage(name, p); }
+    });
+  });
+
+  memberNameInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') memberNameSearchBtn.click();
+  });
+
+  locationSearchBtn.addEventListener('click', async function () {
+    var place = locationPlaceInput.value.trim();
+    if (!place) { locationPlaceInput.focus(); return; }
+    locationStatus.textContent = 'Looking up "' + place + '"…';
+    try {
+      var geo = await geocode(place);
+      await startSearch({
+        label: 'near ' + geo.label, lat: geo.lat, lon: geo.lon,
+        fetchPage: function (p) { return fetchNearbyPage(geo.lat, geo.lon, p); }
+      });
+    } catch (e) {
+      locationStatus.textContent = e.message;
+    }
+  });
+
+  locationPlaceInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') locationSearchBtn.click();
+  });
+
+  locationGeoBtn.addEventListener('click', function () {
+    if (!navigator.geolocation) {
+      locationStatus.textContent = 'Geolocation is not available in this browser.';
+      return;
+    }
+    locationStatus.textContent = 'Getting your location…';
+    navigator.geolocation.getCurrentPosition(async function (pos) {
+      var lat = pos.coords.latitude, lon = pos.coords.longitude;
+      var place = await reverseGeocode(lat, lon);
+      await startSearch({
+        label: 'near ' + place + ' (your location)', lat: lat, lon: lon,
+        fetchPage: function (p) { return fetchNearbyPage(lat, lon, p); }
+      });
+    }, function () {
+      locationStatus.textContent = 'Could not get your location (permission denied?).';
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+  });
+
+  locationNameFilter.addEventListener('input', function () {
+    if (locSearch) renderLocationResults();
+  });
+
+  locationMore.addEventListener('click', function () { loadNextLocationPage(); });
+
+  locationResults.addEventListener('click', function (e) {
+    var item = e.target.closest('.location-result');
+    if (!item || locationRowIndex === null) return;
+    var row = getRow(locationRowIndex);
+    if (row) row.querySelector('.member-input').value = item.dataset.id;
+    closeLocation();
+    handleRowLoad(locationRowIndex, false);
+  });
+
+  closeLocationModal.addEventListener('click', closeLocation);
+  locationModal.addEventListener('click', function (e) {
+    if (e.target === locationModal) closeLocation();
+  });
+
+  // --- Event: Source buttons ---
+  sourceButtons.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-source]');
+    if (!btn) return;
+    source = btn.dataset.source;
+    sourceButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b === btn);
+    });
+    savePrefs();
+    applySource();
+  });
+
+  // --- Event: Popularity option buttons (remembered per source) ---
+  popularityButtons.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-idx]');
+    if (!btn || btn.disabled) return;
+    popIdxBySource[source] = Number(btn.dataset.idx);
+    popularityButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b === btn);
+    });
+    savePrefs();
+  });
+
+  // --- Event: Only-known toggle ---
+  onlyKnownToggle.addEventListener('change', function () {
+    onlyKnown = onlyKnownToggle.checked;
+    savePrefs();
+  });
+
   // --- Event: Size buttons ---
   sizeButtons.addEventListener('click', function (e) {
     var btn = e.target.closest('button[data-size]');
     if (!btn) return;
-    setSize = Number(btn.dataset.size);
-    sizeButtons.querySelectorAll('button').forEach(function (b) {
-      b.classList.toggle('active', b === btn);
-    });
-    if (getLoadedMembers().length > 0) updateRhythmDropdown();
+    if (btn.dataset.size === 'random') sizeAny = true;
+    else { sizeNumeric = Number(btn.dataset.size); sizeAny = false; }
+    updateSizeButtons();
+    savePrefs();
+    updateRhythmDropdown();
   });
 
-  // --- Event: Key mode buttons ---
+  // --- Event: Key mode buttons (remembered across sources) ---
   keyButtons.addEventListener('click', function (e) {
     var btn = e.target.closest('button[data-key]');
     if (!btn) return;
@@ -831,14 +1574,37 @@
     keyButtons.querySelectorAll('button').forEach(function (b) {
       b.classList.toggle('active', b === btn);
     });
+    savePrefs();
   });
 
   // --- Event: Pick set ---
   pickBtn.addEventListener('click', async function () {
     try {
-      currentSet = pickSet(rhythmSelect.value);
+      await loadIncipitsData();
+      if (source === 'random') {
+        if (getLoadedMembers().length === 0) {
+          throw new Error('Load a tunebook first, or choose a different Source.');
+        }
+        currentSet = pickSet(rhythmSelect.value);
+      } else if (source === 'usersets') {
+        await loadUserSets();
+        currentSet = pickPopularSet(userSetsData, 'usersets');
+        currentSet.note = 'saved by ' + currentSet.popularity +
+          ' user' + (currentSet.popularity === 1 ? '' : 's');
+      } else if (source === 'recordings') {
+        await loadRecordedSets();
+        currentSet = pickPopularSet(recordedSetsData, 'recordings');
+        currentSet.note = 'recorded ' + currentSet.popularity +
+          ' time' + (currentSet.popularity === 1 ? '' : 's');
+      } else if (source === 'poptunes') {
+        await loadPopularity();
+        currentSet = pickPopularTunes();
+      } else if (source === 'mysets') {
+        await ensureMySets();
+        currentSet = pickMySet();
+      }
+      setCommitted = false;
       saveBtn.disabled = false;
-      playedSetBtn.disabled = false;
       await renderSet(currentSet);
     } catch (e) {
       alert(e.message);
@@ -848,8 +1614,6 @@
   // --- Event: Save set ---
   saveBtn.addEventListener('click', function () {
     if (!currentSet) return;
-
-    currentSet.tunes.forEach(function (t) { markTunePlayed(t.id); });
 
     var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
     savedSets.push({
@@ -861,24 +1625,20 @@
     });
     localStorage.setItem('sets:' + memberId, JSON.stringify(savedSets));
 
-    saveBtn.disabled = true;
-    playedSetBtn.disabled = true;
-    document.querySelectorAll('.mark-played-btn, .reroll-btn').forEach(function (b) { b.disabled = true; });
-    updateRhythmDropdown();
+    commitSet();
     updateSavedSetsButtons();
   });
 
-  // --- Event: Played Set (Don't Save) ---
-  playedSetBtn.addEventListener('click', function () {
+  // --- Mark every tune in the current set as played, locking the set ---
+  function commitSet() {
     if (!currentSet) return;
-
     currentSet.tunes.forEach(function (t) { markTunePlayed(t.id); });
-
+    setCommitted = true;
     saveBtn.disabled = true;
-    playedSetBtn.disabled = true;
-    document.querySelectorAll('.mark-played-btn, .reroll-btn').forEach(function (b) { b.disabled = true; });
+    document.querySelectorAll('.mark-played-btn, .reroll-btn, .mark-all-played-btn')
+      .forEach(function (b) { b.disabled = true; });
     updateRhythmDropdown();
-  });
+  }
 
   // --- Saved sets helpers ---
   function updateSavedSetsButtons() {
@@ -940,8 +1700,8 @@
     };
 
     savedSetsModal.style.display = 'none';
+    setCommitted = false;
     saveBtn.disabled = true;
-    playedSetBtn.disabled = false;
     renderSet(currentSet);
   });
 
@@ -983,6 +1743,12 @@
 
   // --- Event delegation: mark played / reroll ---
   setDisplay.addEventListener('click', function (e) {
+    var allBtn = e.target.closest('.mark-all-played-btn');
+    if (allBtn && !allBtn.disabled) {
+      commitSet();
+      return;
+    }
+
     var playedBtn = e.target.closest('.mark-played-btn');
     if (playedBtn && !playedBtn.disabled) {
       var tuneId = Number(playedBtn.dataset.tuneId);
@@ -1000,11 +1766,12 @@
     }
   });
 
-  // --- Event: Full tune toggle ---
-  fullTuneToggle.addEventListener('change', function () {
-    showFullTunes = fullTuneToggle.checked;
-    if (currentSet) {
-      renderSet(currentSet);
+  // --- Event: Full tune toggle (rendered above each set) ---
+  setDisplay.addEventListener('change', function (e) {
+    if (e.target.classList.contains('full-tune-toggle')) {
+      showFullTunes = e.target.checked;
+      savePrefs();
+      if (currentSet) renderSet(currentSet);
     }
   });
 
@@ -1016,6 +1783,33 @@
   if (lastMid) getRow(0).querySelector('.member-input').value = lastMid;
 
   renderRecentUsersForRow(0);
+
+  // Restore cached picker preferences.
+  (function applyPrefs() {
+    var p = loadPrefs();
+    if (typeof p.sizeNumeric === 'number') sizeNumeric = p.sizeNumeric;
+    if (typeof p.sizeAny === 'boolean') sizeAny = p.sizeAny;
+    if (p.keyMode) keyMode = p.keyMode;
+    if (typeof p.onlyKnown === 'boolean') onlyKnown = p.onlyKnown;
+    if (typeof p.showFull === 'boolean') showFullTunes = p.showFull;
+    if (p.popIdx) {
+      ['poptunes', 'usersets', 'recordings'].forEach(function (k) {
+        if (typeof p.popIdx[k] === 'number') popIdxBySource[k] = p.popIdx[k];
+      });
+    }
+    if (p.source && document.querySelector('[data-source="' + p.source + '"]')) {
+      source = p.source;
+    }
+    sourceButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.source === source);
+    });
+    keyButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.key === keyMode);
+    });
+    onlyKnownToggle.checked = onlyKnown;
+  })();
+
+  applySource(); // sets control visibility, size/popularity buttons, rhythm list
 
   // Pre-load incipits data in background
   loadIncipitsData().catch(function (e) {

@@ -8,24 +8,75 @@ and saves:
   data/tunes/{tune_id}.json       individual full-tune files
   data/incipits/{tune_id}.json    individual incipit files
   data/incipits.json              combined incipits keyed by tune_id
+
+It also builds the popularity/set datasets that power the non-random
+"choose by popularity" modes (deployed, committed to the repo):
+
+  data/popularity.json     tune_id -> number of tunebook adds
+  data/user_sets.json      popular user-saved sets (exact ordered, count>=2)
+  data/recorded_sets.json  recorded medleys (exact ordered, count>=1)
 """
 import json
 import re
 import sys
 import urllib.request
+from collections import Counter, defaultdict
 from pathlib import Path
+
+import matplotlib
+matplotlib.use('Agg')  # headless backend (no display needed)
+import matplotlib.pyplot as plt
+import numpy as np
 
 import pyabc
 
 
 # ─── Download ──────────────────────────────────────────────────────
 
-def download_tunes(dest='tunes.json'):
-    url = ('https://raw.githubusercontent.com/adactio/TheSession-data/'
-           'main/json/tunes.json')
+TUNES_URL = ('https://raw.githubusercontent.com/adactio/TheSession-data/'
+             'main/json/tunes.json')
+# sets.json is stored with Git LFS, so it must be fetched from the media host
+# (the plain raw URL returns a small LFS pointer file).
+SETS_URL = ('https://media.githubusercontent.com/media/adactio/'
+            'TheSession-data/main/json/sets.json')
+RECORDINGS_URL = ('https://raw.githubusercontent.com/adactio/TheSession-data/'
+                  'main/json/recordings.json')
+POPULARITY_URL = ('https://raw.githubusercontent.com/adactio/TheSession-data/'
+                  'main/json/tune_popularity.json')
+
+# Minimum number of independent occurrences for a set to be kept.
+# User sets: a set two+ users saved is "popular"; one-offs are personal noise.
+# Recordings: a single recording is already a curated medley, so keep all.
+USER_SET_MIN_COUNT = 2
+RECORDED_SET_MIN_COUNT = 1
+
+# Sets longer than this are dropped (the app caps set size at 5, and longer
+# medleys are rare and unwieldy).
+MAX_SET_SIZE = 5
+
+# Popularity options shown in the UI, per source. "Top X%" is rank-based: the
+# X% most popular items (so popular items still appear in the more adventurous,
+# larger pools). Recordings use explicit count ranges instead, since their
+# occurrence counts barely vary (mostly 1).
+TOP_PCT = {
+    'tunes':    [50, 25, 10, 5, 1],
+    'usersets': [40, 10, 5, 1],
+}
+REC_RANGES = [(1, 1), (2, 10), (11, None)]
+
+
+def download(url, dest):
+    """Download url to dest, skipping if the file already exists (cache)."""
+    if Path(dest).exists():
+        print(f'Using cached {dest}')
+        return
     print(f'Downloading {url} ...')
     urllib.request.urlretrieve(url, dest)
     print('Done.')
+
+
+def download_tunes(dest='tunes.json'):
+    download(TUNES_URL, dest)
 
 
 # ─── Helpers (from automated_checks.py) ───────────────────────────
@@ -244,11 +295,190 @@ def process(tunes_path='tunes.json'):
             json.dump([{'tune_id': t, 'name': n, 'error': e}
                        for t, n, e in errors], f, indent=2)
 
+    # tune_id (int) -> rhythm type, used to tag sets below
+    return {int(tid): meta['type'] for tid, meta in all_tunes.items()}
+
+
+# ─── Popularity / set datasets ─────────────────────────────────────
+
+def build_popularity(dest='data/popularity.json'):
+    """tune_id (string) -> number of tunebook adds (int)."""
+    download(POPULARITY_URL, 'tune_popularity.json')
+    with open('tune_popularity.json', encoding='utf-8') as f:
+        pop = json.load(f)
+    out = {p['tune_id']: int(p['tunebooks']) for p in pop}
+    with open(dest, 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False, separators=(',', ':'))
+    print(f'  {dest}: {len(out)} tunes, '
+          f'{Path(dest).stat().st_size / 1024:.0f} KB')
+
+
+# How many example recording titles to attach to each recorded set.
+REC_ALBUM_CAP = 6
+
+
+def aggregate_sets(rows, group_key, order_key, min_count, types, album_of=None):
+    """Group rows into ordered tune-id sequences and count duplicates.
+
+    A "set" is the exact ordered sequence of tune_ids within a group.
+    Groups outside the 2..MAX_SET_SIZE length range, or with any unmatched
+    (empty) tune_id, are skipped. Returns a list of {t:[ids], n:count,
+    r:rhythm} sorted by count descending, keeping only sequences seen
+    >= min_count times. If `album_of(rows)` is given, a capped list of
+    distinct recording titles is attached as `recs`.
+    """
+    groups = defaultdict(list)
+    for r in rows:
+        groups[group_key(r)].append(r)
+
+    sig = Counter()
+    albums = defaultdict(list)
+    for rs in groups.values():
+        rs.sort(key=lambda r: int(order_key(r)))
+        ids = [r['tune_id'] for r in rs]
+        if len(ids) < 2 or len(ids) > MAX_SET_SIZE or any(not i for i in ids):
+            continue
+        key = tuple(int(i) for i in ids)
+        sig[key] += 1
+        if album_of:
+            title = album_of(rs)
+            if title and title not in albums[key]:
+                albums[key].append(title)
+
+    out = []
+    for t, c in sig.items():
+        if c < min_count:
+            continue
+        entry = {'t': list(t), 'n': c, 'r': types.get(t[0], '')}
+        if album_of:
+            entry['recs'] = albums[t][:REC_ALBUM_CAP]
+        out.append(entry)
+    out.sort(key=lambda e: -e['n'])
+    return out
+
+
+def build_user_sets(types, dest='data/user_sets.json'):
+    download(SETS_URL, 'sets.json')
+    with open('sets.json', encoding='utf-8') as f:
+        rows = json.load(f)
+    sets = aggregate_sets(rows, lambda r: r['tuneset'],
+                          lambda r: r['settingorder'],
+                          USER_SET_MIN_COUNT, types)
+    with open(dest, 'w', encoding='utf-8') as f:
+        json.dump(sets, f, ensure_ascii=False, separators=(',', ':'))
+    print(f'  {dest}: {len(sets)} sets (count>={USER_SET_MIN_COUNT}), '
+          f'{Path(dest).stat().st_size / 1024:.0f} KB')
+
+
+def recording_label(rows):
+    """\"Artist, Album\" for a recording-track group (either may be missing)."""
+    artist = (rows[0].get('artist') or '').strip()
+    album = (rows[0].get('recording') or '').strip()
+    if artist and album:
+        return artist + ', ' + album
+    return artist or album
+
+
+def build_recorded_sets(types, dest='data/recorded_sets.json'):
+    download(RECORDINGS_URL, 'recordings.json')
+    with open('recordings.json', encoding='utf-8') as f:
+        rows = json.load(f)
+    sets = aggregate_sets(rows, lambda r: (r['id'], r['track']),
+                          lambda r: r['number'],
+                          RECORDED_SET_MIN_COUNT, types,
+                          album_of=recording_label)
+    with open(dest, 'w', encoding='utf-8') as f:
+        json.dump(sets, f, ensure_ascii=False, separators=(',', ':'))
+    print(f'  {dest}: {len(sets)} medleys (count>={RECORDED_SET_MIN_COUNT}), '
+          f'{Path(dest).stat().st_size / 1024:.0f} KB')
+
+
+# ─── Distribution plots (diagnostics) ─────────────────────────────
+
+def rank_cutoff_value(values, pct):
+    """Popularity value at the boundary of the top `pct` percent (rank-based):
+    the value of the k-th most popular item, k = ceil(pct/100 * N)."""
+    desc = np.sort(np.asarray(values))[::-1]
+    k = int(np.ceil(pct / 100 * len(desc)))
+    return int(desc[min(k, len(desc)) - 1])
+
+
+def plot_distribution(values, lines, title, dest):
+    """Histogram (log-log) + CDF with labelled vertical marker lines.
+    `lines` is a list of (value, label) tuples."""
+    arr = np.asarray(values)
+    fig, (ax_h, ax_c) = plt.subplots(1, 2, figsize=(12, 4.5))
+    cmap = plt.cm.viridis(np.linspace(0, 0.85, max(len(lines), 1)))
+
+    lo = max(int(arr.min()), 1)
+    bins = np.logspace(np.log10(lo), np.log10(arr.max() + 1), 40)
+    ax_h.hist(arr, bins=bins, color='#bbb', edgecolor='#888')
+    ax_h.set_xscale('log'); ax_h.set_yscale('log')
+    ax_h.set_xlabel('popularity'); ax_h.set_ylabel('count (log)')
+    ax_h.set_title(title + ' — histogram')
+
+    srt = np.sort(arr)
+    cdf = np.arange(1, len(srt) + 1) / len(srt)
+    ax_c.plot(srt, cdf, color='#444'); ax_c.set_xscale('log')
+    ax_c.set_xlabel('popularity'); ax_c.set_ylabel('cumulative fraction')
+    ax_c.set_title(title + ' — CDF')
+
+    for (val, lab), c in zip(lines, cmap):
+        for ax in (ax_h, ax_c):
+            ax.axvline(val, color=c, ls='--', lw=1.2)
+        ax_h.text(val, ax_h.get_ylim()[1], f'{lab} (≥{val})', color=c,
+                  rotation=90, va='top', ha='right', fontsize=8)
+
+    fig.suptitle(f'{title} popularity distribution', fontsize=11)
+    fig.tight_layout()
+    Path(dest).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(dest, dpi=110)
+    plt.close(fig)
+    print(f'  {dest}')
+
+
+def build_plots(types):
+    """Plot each source's popularity distribution with the UI cutoff lines."""
+    pop = json.load(open('data/popularity.json', encoding='utf-8'))
+    user_sets = json.load(open('data/user_sets.json', encoding='utf-8'))
+    recorded = json.load(open('data/recorded_sets.json', encoding='utf-8'))
+
+    tune_vals = [v for tid, v in pop.items() if int(tid) in types]
+    us_vals = [s['n'] for s in user_sets]
+    rec_vals = [s['n'] for s in recorded]
+
+    print('Plotting popularity distributions ...')
+    plot_distribution(
+        tune_vals,
+        [(rank_cutoff_value(tune_vals, p), f'Top {p}%') for p in TOP_PCT['tunes']],
+        'tunes', 'plots/tunes.png')
+    plot_distribution(
+        us_vals,
+        [(rank_cutoff_value(us_vals, p), f'Top {p}%') for p in TOP_PCT['usersets']],
+        'user sets', 'plots/usersets.png')
+    plot_distribution(
+        rec_vals, [(1, 'once'), (2, '2–10'), (11, '10+')],
+        'recorded sets', 'plots/recordings.png')
+
+    for src, pcts in TOP_PCT.items():
+        vals = tune_vals if src == 'tunes' else us_vals
+        N = len(vals)
+        sizes = {f'Top {p}%': int(np.ceil(p / 100 * N)) for p in pcts}
+        print(f'    {src}: pool sizes {sizes}')
+    for lo, hi in REC_RANGES:
+        c = sum(1 for v in rec_vals if v >= lo and (hi is None or v <= hi))
+        print(f'    recordings n in [{lo},{hi or "inf"}]: {c}')
+
 
 def main():
     if not Path('tunes.json').exists():
         download_tunes()
-    process()
+    types = process()
+    print('Building popularity / set datasets ...')
+    build_popularity()
+    build_user_sets(types)
+    build_recorded_sets(types)
+    build_plots(types)
 
 
 if __name__ == '__main__':

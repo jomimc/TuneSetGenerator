@@ -20,7 +20,7 @@
   var setCommitted = false;  // true once the current set is saved / all-played
 
   // Set source: 'random' (tunebook), 'mysets', 'usersets', 'recordings', 'poptunes'
-  var source = 'random';
+  var source = 'poptunes';   // new default for first-time users
   var onlyKnown = true;      // set modes: restrict to fully-known sets
 
   // Lazily loaded popularity datasets (see preprocess.py)
@@ -51,7 +51,7 @@
       { label: 'Recorded 10+ times', min: 11, max: Infinity }
     ]
   };
-  var POP_DEFAULT = { poptunes: 1, usersets: 1, recordings: 1 };
+  var POP_DEFAULT = { poptunes: 4, usersets: 1, recordings: 1 }; // poptunes now defaults to Top 1% (index 4)
   // Each popularity source remembers its own selected option.
   var popIdxBySource = {
     poptunes: POP_DEFAULT.poptunes,
@@ -72,14 +72,20 @@
   var addMemberBtn = document.getElementById('addMemberBtn');
   var loadProgress = document.getElementById('loadProgress');
   var tunebookInfo = document.getElementById('tunebookInfo');
-  var pickerSection = document.getElementById('picker-section');
+  var tunebookSection = document.getElementById('tunebook-section');
+  var tunebookHeaderBtn = document.getElementById('tunebookHeaderBtn');
+  var settingsSection = document.getElementById('settings-section');
+  var settingsHeaderBtn = document.getElementById('settingsHeaderBtn');
+  var generateSection = document.getElementById('generate-section');
   var rhythmSelect = document.getElementById('rhythmSelect');
   var pickBtn = document.getElementById('pickBtn');
   var saveBtn = document.getElementById('saveBtn');
   var chooseSavedBtn = document.getElementById('chooseSavedBtn');
   var downloadSavedBtn = document.getElementById('downloadSavedBtn');
   var setDisplay = document.getElementById('set-display');
-  var sourceButtons = document.getElementById('sourceButtons');
+  var sourceButtonsTier1 = document.getElementById('sourceButtonsTier1');
+  var sourceButtonsTier2 = document.getElementById('sourceButtonsTier2');
+  var sourceUnavailableMsg = document.getElementById('sourceUnavailableMsg');
   var sizeButtons = document.getElementById('sizeButtons');
   var randomSizeBtn = document.getElementById('randomSizeBtn');
   var keyButtons = document.getElementById('keyButtons');
@@ -130,7 +136,9 @@
       localStorage.setItem('pickerPrefs', JSON.stringify({
         source: source, sizeNumeric: sizeNumeric, sizeAny: sizeAny,
         keyMode: keyMode, onlyKnown: onlyKnown, showFull: showFullTunes,
-        popIdx: popIdxBySource
+        popIdx: popIdxBySource,
+        tunebookCollapsed: tunebookSection.classList.contains('collapsed'),
+        settingsCollapsed: settingsSection.classList.contains('collapsed')
       }));
     } catch (e) { /* ignore quota/availability errors */ }
   }
@@ -248,14 +256,6 @@
     reloadBtn.style.display = 'none';
     row.appendChild(reloadBtn);
 
-    var help = document.createElement('span');
-    help.className = 'find-number';
-    help.innerHTML =
-      "Don't know your number? " +
-      '<button type="button" class="find-name-btn">Search by name</button>' +
-      ' or <button type="button" class="find-location-btn">Search by location</button>';
-    row.appendChild(help);
-
     if (rowIndex > 0) {
       var removeBtn = document.createElement('button');
       removeBtn.type = 'button';
@@ -264,6 +264,13 @@
       removeBtn.textContent = '\u00d7';
       row.appendChild(removeBtn);
     }
+
+    var help = document.createElement('span');
+    help.className = 'find-number';
+    help.innerHTML =
+      "Don't know your number? " +
+      '<button type="button" class="find-member-btn">Search by name or location</button>';
+    row.appendChild(help);
 
     var recent = document.createElement('div');
     recent.className = 'recent-users';
@@ -298,7 +305,15 @@
       setDisplay.innerHTML = '';
       currentSet = null;
       mySetsData = [];
-      updateRhythmDropdown();
+      // "My…" sources need a tunebook; fall back if the last one was removed.
+      if (source === 'random' || source === 'mysets') {
+        source = 'poptunes';
+        setSourceActive(source);
+        savePrefs();
+        applySource();
+      } else {
+        updateRhythmDropdown();
+      }
     }
   }
 
@@ -334,18 +349,31 @@
 
   function updateTunebookInfo() {
     var loaded = getLoadedMembers();
-    if (loaded.length === 0) { tunebookInfo.textContent = ''; return; }
+    if (loaded.length === 0) { tunebookInfo.innerHTML = ''; return; }
+    var html = '';
     if (loaded.length === 1) {
-      tunebookInfo.textContent = 'Loaded ' + loaded[0].tunebook.length +
-        ' tunes for ' + loaded[0].name + '.';
-      return;
+      html = '<div>Loaded ' + loaded[0].tunebook.length +
+        ' tunes for ' + loaded[0].name + '.</div>';
+      if (loaded[0].sets !== undefined) {
+        html += '<div>Loaded ' + loaded[0].sets.length +
+          ' set' + (loaded[0].sets.length === 1 ? '' : 's') + ' for ' + loaded[0].name + '.</div>';
+      }
+    } else {
+      var parts = loaded.map(function (m) {
+        return m.tunebook.length + ' tunes for ' + m.name;
+      }).join(', ');
+      var common = tunebook.length;
+      html = '<div>Loaded ' + parts + '. ' +
+        common + ' tune' + (common === 1 ? '' : 's') + ' in common.</div>';
+      var allHaveSets = loaded.every(function (m) { return m.sets !== undefined; });
+      if (allHaveSets) {
+        var setsParts = loaded.map(function (m) {
+          return m.sets.length + ' sets for ' + m.name;
+        }).join(', ');
+        html += '<div>Loaded ' + setsParts + '.</div>';
+      }
     }
-    var parts = loaded.map(function (m) {
-      return m.tunebook.length + ' for ' + m.name;
-    }).join(', ');
-    var common = tunebook.length;
-    tunebookInfo.textContent = 'Loaded ' + parts + '. ' +
-      common + ' tune' + (common === 1 ? '' : 's') + ' in common.';
+    tunebookInfo.innerHTML = html;
   }
 
   // --- Played tracking (localStorage, 24-hour timer) ---
@@ -455,6 +483,12 @@
     var primary = getLoadedMembers()[0];
     if (!primary) { mySetsData = []; mySetsMemberId = null; return; }
     if (mySetsMemberId === primary.id && mySetsData) return;
+    // Reuse already-loaded sets if available
+    if (primary.sets) {
+      mySetsData = primary.sets;
+      mySetsMemberId = primary.id;
+      return;
+    }
     var cached = await dbGet('mysets:' + primary.id);
     if (!cached) {
       cached = await fetchMemberSets(primary.id);
@@ -949,8 +983,35 @@
   // --- Reroll a single tune within the current set ---
   function rerollTune(idx) {
     if (!currentSet) return;
-    var buckets = bucketByRhythm();
-    var bucket = (buckets[currentSet.rhythm] || []).slice();
+    var bucket;
+
+    if (source === 'poptunes') {
+      // Build pool the same way pickPopularTunes does
+      var size = effectiveSize();
+      var sorted = getSortedTuneIds();
+      var opt = POP_OPTIONS.poptunes[popIdxBySource.poptunes];
+      var poolIds = sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
+
+      // "Only tunes I know": restrict to the loaded tunebook.
+      if (onlyKnown && getLoadedMembers().length > 0) {
+        var known = {};
+        tunebook.forEach(function (t) { known[t.id] = true; });
+        poolIds = poolIds.filter(function (id) { return known[Number(id)]; });
+      }
+
+      // Filter by rhythm
+      bucket = poolIds.filter(function (id) {
+        var d = incipitsData[id];
+        return d && d.type === currentSet.rhythm;
+      }).map(function (id) {
+        var d = incipitsData[id];
+        return { id: Number(id), name: d.name, type: d.type, mode: d.mode, url: 'https://thesession.org/tunes/' + id };
+      });
+    } else {
+      // random: use tunebook buckets
+      var buckets = bucketByRhythm();
+      bucket = (buckets[currentSet.rhythm] || []).slice();
+    }
 
     var currentIds = {};
     currentSet.tunes.forEach(function (t) { currentIds[t.id] = true; });
@@ -1057,6 +1118,16 @@
     return src === 'usersets' || src === 'recordings' || src === 'mysets';
   }
 
+  // --- UI: update source button availability ---
+  function updateSourceAvailability() {
+    var loaded = getLoadedMembers().length > 0;
+    var tier1Buttons = sourceButtonsTier1.querySelectorAll('button');
+    tier1Buttons.forEach(function (b) {
+      b.disabled = !loaded;
+    });
+    sourceUnavailableMsg.style.display = loaded ? 'none' : '';
+  }
+
   // --- UI: show/hide control rows for the active source ---
   function updateControlVisibility() {
     var loaded = getLoadedMembers().length > 0;
@@ -1068,6 +1139,7 @@
       (source === 'usersets' || source === 'recordings' || source === 'poptunes');
     knownRow.style.display = showKnown ? '' : 'none';
     knownNoun.textContent = (source === 'poptunes') ? 'tunes I know' : 'sets I fully know';
+    updateSourceAvailability();
   }
 
   // --- UI: render the popularity options for the active source ---
@@ -1132,9 +1204,9 @@
       card.dataset.idx = i;
 
       var dis = setCommitted ? ' disabled' : '';
-      // Reroll only makes sense for tunebook-random sets; pre-existing
-      // (popular/recorded) sets are shown intact.
-      var rerollHtml = (source === 'random')
+      // Reroll only makes sense for tunebook-random sets and popular tunes;
+      // pre-existing sets (popular/recorded) are shown intact.
+      var rerollHtml = (source === 'random' || source === 'poptunes')
         ? '<button class="reroll-btn" data-idx="' + i + '"' + dis + ' title="Replace with a new random tune">&#8634; Reroll</button>'
         : '';
 
@@ -1234,9 +1306,8 @@
     rowReloadBtn.style.display = 'none';
     loadProgress.textContent = 'Loading...';
 
-    // If no member was loaded yet, clear any stale picker UI.
+    // If no member was loaded yet, clear any stale set display.
     if (!getLoadedMembers().length) {
-      pickerSection.style.display = 'none';
       setDisplay.innerHTML = '';
       currentSet = null;
     }
@@ -1259,14 +1330,29 @@
       updateMemberIdentity();
       cleanPlayedMap();
       loadProgress.textContent = '';
-      updateTunebookInfo();
       rowReloadBtn.style.display = result.fromCache ? '' : 'none';
       renderAllRecentUsers();
       mySetsMemberId = null; // primary member may have changed
       updateControlVisibility();
       if (source === 'mysets') applySource(); else updateRhythmDropdown();
       updateSavedSetsButtons();
-      pickerSection.style.display = '';
+
+      // Fetch the member's saved sets in the background (cache-aware), so the
+      // set count shows and "My sets" is ready.
+      (async function () {
+        try {
+          var cacheKey = 'mysets:' + resolvedId;
+          var raw = forceReload ? null : await dbGet(cacheKey);
+          if (!raw) { raw = await fetchMemberSets(resolvedId); await dbSet(cacheKey, raw); }
+          members[rowIndex].sets = parseMemberSets(raw);
+          updateTunebookInfo();
+          if (source === 'mysets') { mySetsMemberId = null; applySource(); }
+        } catch (e) {
+          // Silently handle failure — the rest of the app still works.
+        }
+      })();
+
+      updateTunebookInfo();
     } catch (e) {
       loadProgress.textContent = '';
       alert('Error loading tunebook: ' + e.message);
@@ -1302,12 +1388,8 @@
       removeMemberRow(rowIndex);
       return;
     }
-    if (e.target.closest('.find-name-btn')) {
+    if (e.target.closest('.find-member-btn')) {
       openLocationModal(rowIndex, 'name');
-      return;
-    }
-    if (e.target.closest('.find-location-btn')) {
-      openLocationModal(rowIndex, 'place');
       return;
     }
 
@@ -1497,6 +1579,7 @@
     navigator.geolocation.getCurrentPosition(async function (pos) {
       var lat = pos.coords.latitude, lon = pos.coords.longitude;
       var place = await reverseGeocode(lat, lon);
+      locationPlaceInput.value = place;
       await startSearch({
         label: 'near ' + place + ' (your location)', lat: lat, lon: lon,
         fetchPage: function (p) { return fetchNearbyPage(lat, lon, p); }
@@ -1526,17 +1609,39 @@
     if (e.target === locationModal) closeLocation();
   });
 
-  // --- Event: Source buttons ---
-  sourceButtons.addEventListener('click', function (e) {
-    var btn = e.target.closest('button[data-source]');
-    if (!btn) return;
-    source = btn.dataset.source;
-    sourceButtons.querySelectorAll('button').forEach(function (b) {
-      b.classList.toggle('active', b === btn);
+  // --- Event: Source buttons (two tiers) ---
+  function setSourceActive(src) {
+    [sourceButtonsTier1, sourceButtonsTier2].forEach(function (grp) {
+      grp.querySelectorAll('button').forEach(function (b) {
+        b.classList.toggle('active', b.dataset.source === src);
+      });
     });
+  }
+  function handleSourceClick(e) {
+    var btn = e.target.closest('button[data-source]');
+    if (!btn || btn.disabled) return;
+    source = btn.dataset.source;
+    setSourceActive(source);
     savePrefs();
     applySource();
-  });
+  }
+  sourceButtonsTier1.addEventListener('click', handleSourceClick);
+  sourceButtonsTier2.addEventListener('click', handleSourceClick);
+
+  // --- Collapsible sections (Load tunebooks / Settings) ---
+  function setCollapsed(section, headerBtn, collapsed) {
+    section.classList.toggle('collapsed', collapsed);
+    var ind = headerBtn.querySelector('.section-toggle');
+    if (ind) ind.textContent = collapsed ? '▸' : '▾'; // ▸ / ▾
+  }
+  function wireCollapsible(headerBtn, section) {
+    headerBtn.addEventListener('click', function () {
+      setCollapsed(section, headerBtn, !section.classList.contains('collapsed'));
+      savePrefs();
+    });
+  }
+  wireCollapsible(tunebookHeaderBtn, tunebookSection);
+  wireCollapsible(settingsHeaderBtn, settingsSection);
 
   // --- Event: Popularity option buttons (remembered per source) ---
   popularityButtons.addEventListener('click', function (e) {
@@ -1800,13 +1905,22 @@
     if (p.source && document.querySelector('[data-source="' + p.source + '"]')) {
       source = p.source;
     }
-    sourceButtons.querySelectorAll('button').forEach(function (b) {
-      b.classList.toggle('active', b.dataset.source === source);
-    });
+    // "My…" sources need a loaded tunebook; none at startup, so fall back.
+    if ((source === 'random' || source === 'mysets') && getLoadedMembers().length === 0) {
+      source = 'poptunes';
+    }
+    setSourceActive(source);
     keyButtons.querySelectorAll('button').forEach(function (b) {
       b.classList.toggle('active', b.dataset.key === keyMode);
     });
     onlyKnownToggle.checked = onlyKnown;
+    // Both sections default to collapsed (markup); restore any saved state.
+    if (typeof p.tunebookCollapsed === 'boolean') {
+      setCollapsed(tunebookSection, tunebookHeaderBtn, p.tunebookCollapsed);
+    }
+    if (typeof p.settingsCollapsed === 'boolean') {
+      setCollapsed(settingsSection, settingsHeaderBtn, p.settingsCollapsed);
+    }
   })();
 
   applySource(); // sets control visibility, size/popularity buttons, rhythm list

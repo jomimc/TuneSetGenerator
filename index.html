@@ -9,63 +9,91 @@
 <body>
   <h1>Tune Set Generator</h1>
 
-  <div id="tunebook-section">
-    <div id="members-list"></div>
-    <button id="addMemberBtn" type="button">+ Playing with a friend? Add a member to see shared tunes</button>
+  <!-- Section 1: Load tunebooks (collapsible, collapsed by default) -->
+  <div id="tunebook-section" class="collapsible-section collapsed">
+    <button type="button" class="section-header" id="tunebookHeaderBtn">
+      <span class="section-title">Load tunebooks</span>
+      <span class="section-toggle">▸</span>
+    </button>
+    <div class="section-body">
+      <div id="members-list"></div>
+      <button id="addMemberBtn" type="button">+ Playing with a friend? Add a member to see shared tunes</button>
+    </div>
     <div id="loadProgress"></div>
     <div id="tunebookInfo"></div>
   </div>
 
-  <div id="picker-section">
-    <div class="control-row">
-      <label><b>Source:</b></label>
-      <div class="button-group" id="sourceButtons">
-        <button type="button" data-source="random" class="active">My tunebook</button>
-        <button type="button" data-source="mysets">My sets</button>
-        <button type="button" data-source="usersets">Popular sets</button>
-        <button type="button" data-source="recordings">Recorded sets</button>
-        <button type="button" data-source="poptunes">Popular tunes</button>
+  <!-- Section 2: Settings (collapsible, collapsed by default) -->
+  <div id="settings-section" class="collapsible-section collapsed">
+    <button type="button" class="section-header" id="settingsHeaderBtn">
+      <span class="section-title">Settings</span>
+      <span class="section-toggle">▸</span>
+    </button>
+    <div class="section-body">
+      <div class="control-row" id="sourceRow">
+        <label><b>Source:</b></label>
+        <div class="source-tier">
+          <div class="button-group" id="sourceButtonsTier1">
+            <button type="button" data-source="random">My tunebook</button>
+            <button type="button" data-source="mysets">My sets</button>
+          </div>
+          <span id="sourceUnavailableMsg" class="source-unavailable" style="display:none">Load a tunebook to use these features</span>
+        </div>
+        <div class="source-tier">
+          <div class="button-group" id="sourceButtonsTier2">
+            <button type="button" data-source="usersets">Popular sets</button>
+            <button type="button" data-source="recordings">Recorded sets</button>
+            <button type="button" data-source="poptunes" class="active">Popular tunes</button>
+          </div>
+        </div>
+      </div>
+      <div class="control-row" id="sizeRow">
+        <label><b>Size:</b></label>
+        <div class="button-group" id="sizeButtons">
+          <button type="button" id="randomSizeBtn" data-size="random" style="display:none">Random</button>
+          <button type="button" data-size="2">2</button>
+          <button type="button" data-size="3" class="active">3</button>
+          <button type="button" data-size="4">4</button>
+          <button type="button" data-size="5">5</button>
+        </div>
+      </div>
+      <div class="control-row" id="keyRow">
+        <label><b>Keys:</b></label>
+        <div class="button-group" id="keyButtons">
+          <button type="button" data-key="any" class="active">Any</button>
+          <button type="button" data-key="same">All Same</button>
+          <button type="button" data-key="different">All Different</button>
+        </div>
+      </div>
+      <div class="control-row" id="popularityRow" style="display:none">
+        <label><b>Popularity:</b></label>
+        <div class="button-group" id="popularityButtons"></div>
+      </div>
+      <div class="control-row" id="knownRow" style="display:none">
+        <label class="toggle-label"><input type="checkbox" id="onlyKnownToggle" checked> Only <span id="knownNoun">sets I fully know</span></label>
       </div>
     </div>
+  </div>
+
+  <!-- Section 3: Generate (Rhythm + Pick + actions) -->
+  <div id="generate-section">
     <div class="control-row">
       <label for="rhythmSelect"><b>Rhythm:</b></label>
       <select id="rhythmSelect">
         <option value="random">Random</option>
       </select>
-      <button id="pickBtn">Pick</button>
     </div>
-    <div class="control-row" id="sizeRow">
-      <label><b>Size:</b></label>
-      <div class="button-group" id="sizeButtons">
-        <button type="button" id="randomSizeBtn" data-size="random" style="display:none">Random</button>
-        <button type="button" data-size="2">2</button>
-        <button type="button" data-size="3" class="active">3</button>
-        <button type="button" data-size="4">4</button>
-        <button type="button" data-size="5">5</button>
+    <div class="generate-row">
+      <button id="pickBtn" class="pick-btn">Pick</button>
+      <div id="set-actions">
+        <button id="saveBtn" disabled>Save Set</button>
+        <button id="chooseSavedBtn" disabled>Choose from Saved Sets</button>
+        <button id="downloadSavedBtn" disabled>Download Saved Sets</button>
       </div>
-    </div>
-    <div class="control-row" id="keyRow">
-      <label><b>Keys:</b></label>
-      <div class="button-group" id="keyButtons">
-        <button type="button" data-key="any" class="active">Any</button>
-        <button type="button" data-key="same">All Same</button>
-        <button type="button" data-key="different">All Different</button>
-      </div>
-    </div>
-    <div class="control-row" id="popularityRow" style="display:none">
-      <label><b>Popularity:</b></label>
-      <div class="button-group" id="popularityButtons"></div>
-    </div>
-    <div class="control-row" id="knownRow" style="display:none">
-      <label class="toggle-label"><input type="checkbox" id="onlyKnownToggle" checked> Only <span id="knownNoun">sets I fully know</span></label>
-    </div>
-    <div id="set-actions">
-      <button id="saveBtn" disabled>Save Set</button>
-      <button id="chooseSavedBtn" disabled>Choose from Saved Sets</button>
-      <button id="downloadSavedBtn" disabled>Download Saved Sets</button>
     </div>
   </div>
 
+  <!-- Section 4: The set (unchanged) -->
   <div id="set-display"></div>
 
   <div id="saved-sets-modal">

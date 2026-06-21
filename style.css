@@ -39,12 +39,59 @@ button:disabled {
   opacity: 0.6;
 }
 
+/* Collapsible sections */
+.collapsible-section {
+  margin-bottom: 1em;
+}
+
+.section-header {
+  width: 100%;
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.8em 1em;
+  font-size: 1em;
+  font-weight: bold;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #333;
+}
+
+.section-header:hover {
+  background-color: #efefef;
+}
+
+.section-title {
+  flex: 1;
+}
+
+.section-toggle {
+  font-size: 0.8em;
+}
+
+.section-body {
+  padding: 1em 0;
+  display: block;
+}
+
+.collapsible-section.collapsed .section-body {
+  display: none;
+}
+
 #tunebook-section {
   display: flex;
   align-items: flex-start;
   gap: 0.5em;
   flex-wrap: wrap;
   flex-direction: column;
+}
+
+#tunebook-section #loadProgress,
+#tunebook-section #tunebookInfo {
+  width: 100%;
 }
 
 #members-list {
@@ -101,8 +148,7 @@ button:disabled {
   color: #777;
 }
 
-.find-name-btn,
-.find-location-btn {
+.find-member-btn {
   background: none;
   border: none;
   padding: 0;
@@ -112,8 +158,7 @@ button:disabled {
   text-decoration: none;
 }
 
-.find-name-btn:hover,
-.find-location-btn:hover { text-decoration: underline; }
+.find-member-btn:hover { text-decoration: underline; }
 
 .recent-users {
   width: 100%;
@@ -180,12 +225,71 @@ button:disabled {
   background: rgba(0,0,0,0.08);
 }
 
-#picker-section {
-  margin-top: 1em;
+#settings-section {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.5em;
+}
+
+#sourceRow {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6em;
+}
+
+.source-tier {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  width: 100%;
+}
+
+.source-unavailable {
+  font-size: 0.85em;
+  color: #999;
+  font-style: italic;
+}
+
+#sourceButtonsTier1 button,
+#sourceButtonsTier2 button {
+  opacity: 1;
+  transition: opacity 0.2s;
+}
+
+#sourceButtonsTier1 button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#generate-section {
+  margin-top: 1em;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.8em;
+  width: 100%;
+}
+
+.generate-row {
+  display: flex;
+  gap: 0.8em;
+  width: 100%;
+  align-items: flex-start;
+}
+
+.pick-btn {
+  background-color: #4CAF50;
+  font-size: 1.2em;
+  padding: 0.8em 1.5em;
+  font-weight: bold;
+  flex: 2;
+  min-width: 150px;
+  height: auto;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .control-row {
@@ -371,11 +475,15 @@ button:disabled {
 
 /* Set action buttons row */
 #set-actions {
-  width: 100%;
   display: flex;
+  flex-direction: column;
   gap: 0.5em;
-  flex-wrap: wrap;
-  margin-top: 0.5em;
+  flex: 1;
+}
+
+#set-actions button {
+  width: 100%;
+  font-size: 0.9em;
 }
 
 #playedSetBtn {

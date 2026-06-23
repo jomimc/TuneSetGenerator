@@ -131,4 +131,17 @@ two (a hard refresh clears cached assets). There is no separate build or
 | `data/` | Preprocessed tune, incipit, popularity, and set data |
 
 See `CLAUDE.md` for fuller implementation notes.
-```
+
+## License
+
+The code in this repository is released under the [MIT License](LICENSE) —
+you're free to use, modify, and redistribute it, including commercially.
+
+A couple of things bundled here keep their own licenses:
+
+- **Tune data** (`data/*.json`) is derived from the
+  [TheSession-data](https://github.com/adactio/TheSession-data) dump, which its
+  maintainer releases into the public domain.
+- **Donate logos** are from [Font Awesome](https://fontawesome.com) (icons under
+  CC BY 4.0), and the CDN libraries (abcjs, SortableJS, idb-keyval, SheetJS,
+  jsPDF, svg2pdf.js) are each under their own permissive licenses.

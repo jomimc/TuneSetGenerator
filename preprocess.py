@@ -222,46 +222,65 @@ def process(tunes_path='tunes.json'):
         entries = json.load(f)
     print(f'  {len(entries)} settings loaded.')
 
-    # Keep original (lowest setting_id) setting per tune
-    by_id = {}
+    # Group every setting per tune, ordered by setting_id ascending so the
+    # original (lowest setting_id) setting stays first — that's the "default"
+    # used for picking/key logic and shown before the user swipes.
+    settings_by_tune = defaultdict(list)
     for e in entries:
-        tid = e['tune_id']
-        if tid not in by_id or int(e['setting_id']) < int(by_id[tid]['setting_id']):
-            by_id[tid] = e
-    print(f'  {len(by_id)} unique tunes.')
+        settings_by_tune[e['tune_id']].append(e)
+    for slist in settings_by_tune.values():
+        slist.sort(key=lambda e: int(e['setting_id']))
+    print(f'  {len(settings_by_tune)} unique tunes.')
 
-    all_incipits = {}
-    all_tunes = {}
+    # Combined incipits.json keeps the default setting only (+ ns = total
+    # setting count when >1) — it drives the picker and the fast default
+    # render, and is loaded whole into memory. The chunked files carry the
+    # full per-setting arrays (lazy-loaded only when a tune is expanded or
+    # swiped):
+    #   data/incipits/  per-setting incipits, multi-setting tunes only
+    #   data/tunes/     per-setting full ABC, all tunes
+    all_incipits = {}        # combined default + ns (metadata)
+    all_tunes = {}           # combined default full ABC (gitignored debug aid)
+    incipit_settings = {}    # chunked: {tid: [{meter,mode,abc}, ...]}
+    tune_settings = {}       # chunked: {tid: [{meter,mode,abc}, ...]}
     errors = []
-    total = len(by_id)
+    total = len(settings_by_tune)
 
-    for i, (tid, entry) in enumerate(by_id.items()):
+    for i, (tid, slist) in enumerate(settings_by_tune.items()):
         if (i + 1) % 2000 == 0 or i + 1 == total:
             sys.stdout.write(f'\r  Processing {i+1}/{total} ...')
             sys.stdout.flush()
 
+        inc_list = []
+        full_list = []
+        for entry in slist:
+            abc_full = entry['abc'].replace('\r\n', '\n').strip()
+            try:
+                clean_abc = remove_unnecessary_elements(entry['abc'])
+                clean_entry = dict(entry, abc=clean_abc)
+                abc_inc = extract_incipit(pyabc.Tune(json=clean_entry), entry['meter'])
+            except Exception as ex:
+                errors.append((tid, entry['name'], str(ex)))
+                abc_inc = abc_full  # fallback: keep full ABC
+            inc_list.append({'meter': entry['meter'], 'mode': entry['mode'], 'abc': abc_inc})
+            full_list.append({'meter': entry['meter'], 'mode': entry['mode'], 'abc': abc_full})
+
+        default = slist[0]
+        ns = len(slist)
         meta = {
-            'name':  entry['name'],
-            'type':  entry['type'],
-            'meter': entry['meter'],
-            'mode':  entry['mode'],
+            'name':  default['name'],
+            'type':  default['type'],
+            'meter': default['meter'],
+            'mode':  default['mode'],
         }
 
-        # ── full tune ──
-        abc_full = entry['abc'].replace('\r\n', '\n').strip()
-        all_tunes[tid] = {**meta, 'abc': abc_full}
-
-        # ── incipit ──
-        try:
-            clean_abc = remove_unnecessary_elements(entry['abc'])
-            clean_entry = dict(entry, abc=clean_abc)
-            tune_obj = pyabc.Tune(json=clean_entry)
-            abc_inc = extract_incipit(tune_obj, entry['meter'])
-        except Exception as ex:
-            errors.append((tid, entry['name'], str(ex)))
-            abc_inc = abc_full  # fallback: keep full ABC
-
-        all_incipits[tid] = {**meta, 'abc': abc_inc}
+        inc_meta = {**meta, 'abc': inc_list[0]['abc']}
+        if ns > 1:
+            inc_meta['ns'] = ns
+            incipit_settings[tid] = inc_list  # only multi-setting tunes need chunks
+        all_incipits[tid] = inc_meta
+        all_tunes[tid] = {**meta, 'abc': full_list[0]['abc']}
+        tune_settings[tid] = full_list
 
     print()
 
@@ -279,11 +298,11 @@ def process(tunes_path='tunes.json'):
     print(f'  data/incipits.json: {inc_mb:.1f} MB')
     print(f'  data/tunes.json:    {tun_mb:.1f} MB')
 
-    # ── Save chunked files ──
+    # ── Save chunked per-setting files ──
     print('Saving chunked files ...')
-    n_inc = save_chunks(all_incipits, 'data/incipits')
-    n_tun = save_chunks(all_tunes, 'data/tunes')
-    print(f'  data/incipits/: {n_inc} chunk files')
+    n_inc = save_chunks(incipit_settings, 'data/incipits')
+    n_tun = save_chunks(tune_settings, 'data/tunes')
+    print(f'  data/incipits/: {n_inc} chunk files ({len(incipit_settings)} multi-setting tunes)')
     print(f'  data/tunes/:    {n_tun} chunk files')
 
     print(f'\nDone. {total} tunes processed, {len(errors)} errors.')

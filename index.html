@@ -34,8 +34,8 @@
         <label><b>Source:</b></label>
         <div class="source-tier">
           <div class="button-group" id="sourceButtonsTier1">
-            <button type="button" data-source="random">My tunebook</button>
-            <button type="button" data-source="mysets">My sets</button>
+            <button type="button" data-source="random">My TheSession Tunebook</button>
+            <button type="button" data-source="mysets">My TheSession Sets</button>
           </div>
           <span id="sourceUnavailableMsg" class="source-unavailable" style="display:none">Load a tunebook to use these features</span>
         </div>
@@ -46,6 +46,9 @@
             <button type="button" data-source="poptunes" class="active">Popular tunes</button>
           </div>
         </div>
+      </div>
+      <div class="control-row" id="knownRow" style="display:none">
+        <label class="toggle-label"><input type="checkbox" id="onlyKnownToggle" checked> Only tunes in my tunebook</label>
       </div>
       <div class="control-row" id="sizeRow">
         <label><b>Size:</b></label>
@@ -63,14 +66,12 @@
           <button type="button" data-key="any" class="active">Any</button>
           <button type="button" data-key="same">All Same</button>
           <button type="button" data-key="different">All Different</button>
+          <button type="button" data-key="change">Always Change</button>
         </div>
       </div>
       <div class="control-row" id="popularityRow" style="display:none">
         <label><b>Popularity:</b></label>
         <div class="button-group" id="popularityButtons"></div>
-      </div>
-      <div class="control-row" id="knownRow" style="display:none">
-        <label class="toggle-label"><input type="checkbox" id="onlyKnownToggle" checked> Only <span id="knownNoun">sets I fully know</span></label>
       </div>
     </div>
   </div>
@@ -88,6 +89,7 @@
       <div id="set-actions">
         <button id="saveBtn" disabled>Save Set</button>
         <button id="chooseSavedBtn" disabled>Choose Saved Set</button>
+        <button id="pdfBtn">PDF</button>
       </div>
     </div>
   </div>
@@ -129,6 +131,8 @@
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/abcjs@6.4.4/dist/abcjs-basic-min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

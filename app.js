@@ -10,7 +10,12 @@
   var currentSet = null;
   var incipitsData = null;   // combined incipits.json, keyed by tune_id string
   var tuneChunks = {};       // cached full-tune chunks, keyed by chunk number
-  var showFullTunes = false;
+  var incipitChunks = {};    // cached per-setting incipit chunks (multi-setting tunes)
+  var showFullTunes = false; // "All Full" default; per-tune .full overrides this
+  var nameOnly = false;      // "Name only" — hides all notation, overrides full
+  // Remembered per-tune setting choice: { tuneId(string): settingIdx }. Tune
+  // settings are global (not member-specific), so this is a single shared map.
+  var settingChoices = {};
   // Size memory: a numeric size (all sources) plus an "any/random" override that
   // only applies to sources offering it (pre-existing sets). Both persist across
   // source switches, like keyMode does.
@@ -82,6 +87,7 @@
   var saveBtn = document.getElementById('saveBtn');
   var chooseSavedBtn = document.getElementById('chooseSavedBtn');
   var downloadSavedBtn = document.getElementById('downloadSavedBtn');
+  var pdfBtn = document.getElementById('pdfBtn');
   var setDisplay = document.getElementById('set-display');
   var sourceButtonsTier1 = document.getElementById('sourceButtonsTier1');
   var sourceButtonsTier2 = document.getElementById('sourceButtonsTier2');
@@ -92,7 +98,6 @@
   var popularityButtons = document.getElementById('popularityButtons');
   var popularityRow = document.getElementById('popularityRow');
   var knownRow = document.getElementById('knownRow');
-  var knownNoun = document.getElementById('knownNoun');
   var onlyKnownToggle = document.getElementById('onlyKnownToggle');
   var savedSetsModal = document.getElementById('saved-sets-modal');
   var savedSetsList = document.getElementById('saved-sets-list');
@@ -136,7 +141,7 @@
       localStorage.setItem('pickerPrefs', JSON.stringify({
         source: source, sizeNumeric: sizeNumeric, sizeAny: sizeAny,
         keyMode: keyMode, onlyKnown: onlyKnown, showFull: showFullTunes,
-        popIdx: popIdxBySource,
+        nameOnly: nameOnly, popIdx: popIdxBySource,
         tunebookCollapsed: tunebookSection.classList.contains('collapsed'),
         settingsCollapsed: settingsSection.classList.contains('collapsed')
       }));
@@ -145,6 +150,16 @@
   function loadPrefs() {
     try { return JSON.parse(localStorage.getItem('pickerPrefs') || '{}'); }
     catch (e) { return {}; }
+  }
+
+  // --- Remembered per-tune setting choices (separate, shared across members) ---
+  function loadSettingChoices() {
+    try { settingChoices = JSON.parse(localStorage.getItem('settingChoices') || '{}'); }
+    catch (e) { settingChoices = {}; }
+  }
+  function saveSettingChoices() {
+    try { localStorage.setItem('settingChoices', JSON.stringify(settingChoices)); }
+    catch (e) { /* ignore quota/availability errors */ }
   }
 
   // --- Recent users ---
@@ -545,27 +560,54 @@
     return dataset.filter(function (s) { return s.n >= opt.min && s.n <= opt.max; });
   }
 
-  // Load a full-tune chunk on demand, cache in memory
-  async function loadTuneChunk(chunkId) {
-    if (tuneChunks[chunkId]) return tuneChunks[chunkId];
-    var resp = await fetch('data/tunes/' + chunkId + '.json');
-    if (!resp.ok) throw new Error('Failed to load tune chunk ' + chunkId);
-    tuneChunks[chunkId] = await resp.json();
-    return tuneChunks[chunkId];
+  // Load a chunked per-setting file on demand, cache in memory.
+  // full=true -> data/tunes/ (full ABC, all tunes); else data/incipits/
+  // (incipits, multi-setting tunes only). Each entry is an array of
+  // { meter, mode, abc } settings, ordered with the default setting first.
+  async function loadSettingsChunk(chunkId, full) {
+    var store = full ? tuneChunks : incipitChunks;
+    if (store[chunkId]) return store[chunkId];
+    var dir = full ? 'tunes' : 'incipits';
+    var resp = await fetch('data/' + dir + '/' + chunkId + '.json');
+    if (!resp.ok) throw new Error('Failed to load ' + dir + ' chunk ' + chunkId);
+    store[chunkId] = await resp.json();
+    return store[chunkId];
   }
 
-  // Get tune data for a given tune ID (incipit or full depending on toggle)
-  async function getTuneData(tuneId) {
+  // All settings (array of { meter, mode, abc }) for a tune, in the requested
+  // view (incipit or full), falling back to the thesession.org API.
+  async function getTuneSettings(tuneId, full) {
     var tid = String(tuneId);
-    if (!showFullTunes) {
-      if (incipitsData && incipitsData[tid]) return incipitsData[tid];
-    } else {
-      var chunkId = Math.floor(parseInt(tid) / CHUNK_SIZE);
-      var chunk = await loadTuneChunk(chunkId);
-      if (chunk[tid]) return chunk[tid];
+    var chunkId = Math.floor(parseInt(tid) / CHUNK_SIZE);
+    var chunk = await loadSettingsChunk(chunkId, full);
+    if (chunk[tid]) return chunk[tid];
+    var d = await fetchTuneDetailAPI(tuneId);
+    return [{ meter: d.meter, mode: d.mode, abc: d.abc }];
+  }
+
+  // Tune data for one setting. settingIdx 0 = default. Returns the chosen
+  // setting plus settingCount/settingIdx so the UI can show "n / N" and cycle.
+  // The default incipit (setting 0, not full) uses the in-memory combined
+  // incipits.json — instant, no fetch — so the first render stays fast.
+  async function getTuneData(tuneId, settingIdx, full) {
+    var tid = String(tuneId);
+    var meta = (incipitsData && incipitsData[tid]) || {};
+    var ns = meta.ns || 1;
+    settingIdx = settingIdx || 0;
+    if (!full && settingIdx === 0 && meta.abc != null) {
+      return {
+        name: meta.name, type: meta.type, meter: meta.meter,
+        mode: meta.mode, abc: meta.abc, settingCount: ns, settingIdx: 0
+      };
     }
-    // Fallback: fetch from thesession.org API
-    return fetchTuneDetailAPI(tuneId);
+    var arr = await getTuneSettings(tuneId, full);
+    var i = Math.min(settingIdx, arr.length - 1);
+    var s = arr[i];
+    return {
+      name: meta.name || ('Tune #' + tuneId), type: meta.type || '',
+      meter: s.meter, mode: s.mode, abc: s.abc,
+      settingCount: Math.max(arr.length, ns), settingIdx: i
+    };
   }
 
   // --- Tunebook API ---
@@ -721,6 +763,43 @@
     return byKey;
   }
 
+  // --- "Always Change" keys: no two ADJACENT tunes share a mode (repeats are
+  // allowed, just not in a row). ---
+
+  // Can `size` items be chosen so no two adjacent share a mode? Feasible iff,
+  // after capping each mode's usable count at ceil(size/2), enough remain.
+  function canArrangeNoAdjacent(byKey, size) {
+    if (size <= 0) return true;
+    var cap = Math.ceil(size / 2), sum = 0;
+    for (var m in byKey) sum += Math.min(byKey[m].length, cap);
+    return sum >= size;
+  }
+
+  // Greedy build: at each step take from the most-abundant remaining mode that
+  // isn't the previous one (the reorganize-string rule), so it succeeds exactly
+  // when canArrangeNoAdjacent does. Works for any byKey of mode -> [items].
+  function pickNoAdjacent(byKey, size) {
+    var groups = Object.keys(byKey).map(function (m) {
+      return { mode: m, items: pickRandomUnique(byKey[m], byKey[m].length) };
+    });
+    var picked = [], last = null;
+    for (var s = 0; s < size; s++) {
+      var best = null;
+      for (var i = 0; i < groups.length; i++) {
+        var g = groups[i];
+        if (g.items.length === 0 || g.mode === last) continue;
+        if (!best || g.items.length > best.items.length ||
+            (g.items.length === best.items.length && Math.random() < 0.5)) {
+          best = g;
+        }
+      }
+      if (!best) return null;
+      picked.push(best.items.pop());
+      last = best.mode;
+    }
+    return picked;
+  }
+
   function rhythmEligible(bucket, size, kmode) {
     if (bucket.length < size) return false;
     if (kmode === 'any') return true;
@@ -735,6 +814,9 @@
         if (bucket[i].mode) seen[bucket[i].mode] = true;
       }
       return Object.keys(seen).length >= size;
+    }
+    if (kmode === 'change') {
+      return canArrangeNoAdjacent(groupByKey(bucket), size);
     }
     return false;
   }
@@ -763,6 +845,9 @@
         picked.push(pool[Math.floor(Math.random() * pool.length)]);
       }
       return picked;
+    }
+    if (kmode === 'change') {
+      return pickNoAdjacent(groupByKey(bucket), size);
     }
     return pickRandomUnique(bucket, size);
   }
@@ -823,6 +908,13 @@
     if (modes.some(function (m) { return !m; })) return false; // unknown key
     if (keyMode === 'same') {
       return modes.every(function (m) { return m === modes[0]; });
+    }
+    if (keyMode === 'change') {
+      // No two adjacent tunes share a mode (non-adjacent repeats are fine).
+      for (var c = 1; c < modes.length; c++) {
+        if (modes[c] === modes[c - 1]) return false;
+      }
+      return true;
     }
     // 'different'
     var seen = {};
@@ -945,6 +1037,7 @@
           return g.byMode[m].length >= size;
         });
       }
+      if (keyMode === 'change') return canArrangeNoAdjacent(g.byMode, size);
       return Object.keys(g.byMode).length >= size; // 'different'
     }
 
@@ -979,6 +1072,8 @@
       ids = pickedModes.map(function (m) {
         return g.byMode[m][Math.floor(Math.random() * g.byMode[m].length)];
       });
+    } else if (keyMode === 'change') {
+      ids = pickNoAdjacent(g.byMode, size);
     } else {
       ids = pickRandomUnique(g.all, size);
     }
@@ -1028,6 +1123,14 @@
         if (i !== idx && t.mode) used[t.mode] = true;
       });
       bucket = bucket.filter(function (t) { return t.mode && !used[t.mode]; });
+    } else if (keyMode === 'change') {
+      // Only the immediate neighbours' modes are off-limits.
+      var neighbours = {};
+      [idx - 1, idx + 1].forEach(function (n) {
+        var t = currentSet.tunes[n];
+        if (t && t.mode) neighbours[t.mode] = true;
+      });
+      bucket = bucket.filter(function (t) { return t.mode && !neighbours[t.mode]; });
     }
 
     if (bucket.length === 0) {
@@ -1128,7 +1231,6 @@
     var showKnown = loaded &&
       (source === 'usersets' || source === 'recordings' || source === 'poptunes');
     knownRow.style.display = showKnown ? '' : 'none';
-    knownNoun.textContent = (source === 'poptunes') ? 'tunes I know' : 'sets I fully know';
     updateSourceAvailability();
   }
 
@@ -1168,20 +1270,106 @@
     updateRhythmDropdown();
   }
 
+  // Whether a tune should render in full: a per-tune override wins, else the
+  // global "All Full" state.
+  function effectiveFull(tune) {
+    return (tune.full !== undefined) ? tune.full : showFullTunes;
+  }
+
+  // Cards are found by data-idx (not fixed ids) so partial re-renders survive
+  // drag reordering, which renumbers data-idx in onEnd.
+  function tuneCard(idx) {
+    return setDisplay.querySelector('#tuneList .tune-card[data-idx="' + idx + '"]');
+  }
+
+  function updateFullBtn(card, full) {
+    var btn = card.querySelector('.full-btn');
+    if (btn) btn.classList.toggle('on', !!full);
+  }
+
+  // The "Setting n / N" line with prev/next nav, beneath the tune name. Hidden
+  // for single-setting tunes.
+  function updateSettingIndicator(card, cur, count) {
+    var el = card.querySelector('.tune-setting');
+    if (!el) return;
+    if (!count || count < 2) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = '';
+    el.innerHTML =
+      '<button class="setting-nav" data-dir="-1" title="Previous setting">‹</button>' +
+      '<span class="setting-num">Setting ' + (cur + 1) + ' / ' + count + '</span>' +
+      '<button class="setting-nav" data-dir="1" title="Next setting">›</button>';
+  }
+
+  // Render (or re-render) the notation, key and setting indicator for one card.
+  function renderTuneNotation(idx) {
+    var card = tuneCard(idx);
+    if (!card) return Promise.resolve();
+    var tune = currentSet.tunes[idx];
+    // Apply a remembered setting choice for this tune the first time it renders.
+    if (tune.settingIdx == null && settingChoices[String(tune.id)] != null) {
+      tune.settingIdx = settingChoices[String(tune.id)];
+    }
+    var abcDiv = card.querySelector('.abc-render');
+
+    // "Name only" overrides everything: just the title, no notation/key/setting.
+    if (nameOnly) {
+      abcDiv.innerHTML = '';
+      var keyOff = card.querySelector('.tune-key');
+      if (keyOff) keyOff.textContent = '';
+      updateSettingIndicator(card, 0, 1);
+      return Promise.resolve();
+    }
+
+    var full = effectiveFull(tune);
+    abcDiv.textContent = 'Loading notation...';
+    updateFullBtn(card, full);
+    return getTuneData(tune.id, tune.settingIdx || 0, full).then(function (d) {
+      // Store mode/setting on the tune object for save/download and cycling.
+      tune.mode = d.mode;
+      tune.settingCount = d.settingCount;
+      tune.settingIdx = d.settingIdx;
+      ABCJS.renderAbc(abcDiv, buildABCString(d), { responsive: 'resize' });
+      var keyEl = card.querySelector('.tune-key');
+      if (keyEl) keyEl.textContent = ' — ' + formatKeyDisplay(d.mode);
+      updateSettingIndicator(card, d.settingIdx, d.settingCount);
+    }).catch(function (e) {
+      abcDiv.textContent = 'Failed to load notation: ' + e.message;
+    });
+  }
+
+  // Step a single tune to its previous/next setting (display only — the set's
+  // key logic stays fixed on each tune's default setting). The choice is
+  // remembered so the tune defaults to it next time.
+  function cycleSetting(idx, dir) {
+    var tune = currentSet.tunes[idx];
+    var n = tune.settingCount || 1;
+    if (n < 2) return;
+    tune.settingIdx = (((tune.settingIdx || 0) + dir) % n + n) % n;
+    if (tune.settingIdx === 0) delete settingChoices[String(tune.id)];
+    else settingChoices[String(tune.id)] = tune.settingIdx;
+    saveSettingChoices();
+    renderTuneNotation(idx);
+  }
+
   // --- UI: render set ---
   async function renderSet(set) {
     var note = set.note ? ' <span class="set-note">' + set.note + '</span>' : '';
     setDisplay.innerHTML =
       '<div class="set-header"><h3>' + set.rhythm + ' set' + note + '</h3></div>' +
       '<div class="set-controls">' +
-        '<label class="full-tune-label"><input type="checkbox" class="full-tune-toggle"' +
-          (showFullTunes ? ' checked' : '') + '> Show full tunes</label>' +
+        '<div class="full-controls">' +
+          '<button class="name-only-btn toggle-btn' + (nameOnly ? ' on' : '') +
+            '" title="Show tune names only, no notation">Name only</button>' +
+          '<button class="all-full-btn toggle-btn' + (showFullTunes ? ' on' : '') +
+            '" title="Show every tune in full">All Full</button>' +
+        '</div>' +
         '<button class="mark-all-played-btn"' + (setCommitted ? ' disabled' : '') + '>' +
           '&#10004; Mark All Played</button>' +
       '</div>';
 
     var list = document.createElement('div');
     list.id = 'tuneList';
+    list.classList.toggle('name-only', nameOnly); // compact cards, no notation
     setDisplay.appendChild(list);
 
     for (var i = 0; i < set.tunes.length; i++) {
@@ -1202,9 +1390,13 @@
       header.innerHTML =
         '<span class="drag-handle">&#9776;</span>' +
         '<span class="tune-info">' +
-          '<a href="' + tune.url + '" target="_blank">' + tune.name + '</a>' +
-          '<span class="tune-key" id="key-' + i + '"></span>' +
+          '<span class="tune-title">' +
+            '<a href="' + tune.url + '" target="_blank">' + tune.name + '</a>' +
+            '<span class="tune-key"></span>' +
+          '</span>' +
+          '<span class="tune-setting" style="display:none"></span>' +
         '</span>' +
+        '<button class="full-btn toggle-btn" title="Show this tune in full">Full</button>' +
         rerollHtml +
         '<button class="mark-played-btn" data-tune-id="' + tune.id + '" data-idx="' + i + '"' + dis + '>' +
           '&#10004; Played</button>';
@@ -1212,7 +1404,6 @@
 
       var abcDiv = document.createElement('div');
       abcDiv.className = 'abc-render';
-      abcDiv.id = 'abc-' + i;
       abcDiv.textContent = 'Loading notation...';
       card.appendChild(abcDiv);
 
@@ -1250,22 +1441,9 @@
       setDisplay.appendChild(rec);
     }
 
-    // Look up tune data and render ABC
-    var promises = set.tunes.map(function (tune, idx) {
-      return getTuneData(tune.id).then(function (tuneData) {
-        // Store mode on tune object for save/download
-        tune.mode = tuneData.mode;
-        var abcStr = buildABCString(tuneData);
-        ABCJS.renderAbc('abc-' + idx, abcStr, { responsive: 'resize' });
-        document.getElementById('key-' + idx).textContent =
-          ' \u2014 ' + formatKeyDisplay(tuneData.mode);
-      }).catch(function (e) {
-        document.getElementById('abc-' + idx).textContent =
-          'Failed to load notation: ' + e.message;
-      });
-    });
-
-    await Promise.all(promises);
+    await Promise.all(set.tunes.map(function (_, idx) {
+      return renderTuneNotation(idx);
+    }));
   }
 
   // --- Event: Load tunebook (per row) ---
@@ -1720,16 +1898,19 @@
     });
     localStorage.setItem('sets:' + memberId, JSON.stringify(savedSets));
 
-    commitSet();
+    commitSet(true);
     updateSavedSetsButtons();
   });
 
   // --- Mark every tune in the current set as played, locking the set ---
-  function commitSet() {
+  // lockSave: only Save itself disables the Save button. "Mark All Played"
+  // marks the tunes and locks the per-tune controls but leaves Save available,
+  // so a marked set can still be saved afterwards.
+  function commitSet(lockSave) {
     if (!currentSet) return;
     currentSet.tunes.forEach(function (t) { markTunePlayed(t.id); });
     setCommitted = true;
-    saveBtn.disabled = true;
+    if (lockSave) saveBtn.disabled = true;
     document.querySelectorAll('.mark-played-btn, .reroll-btn, .mark-all-played-btn')
       .forEach(function (b) { b.disabled = true; });
     updateRhythmDropdown();
@@ -1751,11 +1932,9 @@
       String(d.getDate()).padStart(2, '0');
   }
 
-  // --- Event: Choose from Saved Sets ---
-  chooseSavedBtn.addEventListener('click', function () {
+  // (Re)build the saved-sets modal list from localStorage.
+  function renderSavedSetsList() {
     var savedSets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
-    if (savedSets.length === 0) { alert('No saved sets.'); return; }
-
     savedSetsList.innerHTML = '';
     for (var i = 0; i < savedSets.length; i++) {
       var set = savedSets[i];
@@ -1765,15 +1944,40 @@
 
       var tuneNames = set.tunes.map(function (t) { return t.name; }).join(', ');
       item.innerHTML =
-        '<strong>' + formatSavedDate(set.date) + '</strong> \u2014 ' +
-        set.rhythm + ' set<br>' +
-        '<span class="saved-set-tunes">' + tuneNames + '</span>';
+        '<div class="saved-set-info">' +
+          '<strong>' + formatSavedDate(set.date) + '</strong> \u2014 ' +
+          set.rhythm + ' set<br>' +
+          '<span class="saved-set-tunes">' + tuneNames + '</span>' +
+        '</div>' +
+        '<button class="delete-set-btn" data-index="' + i +
+          '" title="Delete this saved set">\u00d7</button>';
       savedSetsList.appendChild(item);
     }
+    return savedSets.length;
+  }
+
+  // --- Event: Choose from Saved Sets ---
+  chooseSavedBtn.addEventListener('click', function () {
+    if (renderSavedSetsList() === 0) { alert('No saved sets.'); return; }
     savedSetsModal.style.display = 'flex';
   });
 
   savedSetsList.addEventListener('click', function (e) {
+    // Delete (red \u00d7) \u2014 handled before the load-on-click below.
+    var delBtn = e.target.closest('.delete-set-btn');
+    if (delBtn) {
+      var di = parseInt(delBtn.dataset.index);
+      var sets = JSON.parse(localStorage.getItem('sets:' + memberId) || '[]');
+      if (di >= 0 && di < sets.length &&
+          confirm('Delete this saved set? This cannot be undone.')) {
+        sets.splice(di, 1);
+        localStorage.setItem('sets:' + memberId, JSON.stringify(sets));
+        updateSavedSetsButtons();
+        if (renderSavedSetsList() === 0) savedSetsModal.style.display = 'none';
+      }
+      return;
+    }
+
     var item = e.target.closest('.saved-set-item');
     if (!item) return;
 
@@ -1836,8 +2040,148 @@
     XLSX.writeFile(wb, 'saved_sets.xlsx');
   });
 
-  // --- Event delegation: mark played / reroll ---
+  // --- Event: PDF of the current set, honouring the on-screen display ---
+  function capitalizeWords(s) {
+    return (s || '').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
+
+  // Render an SVG into the jsPDF doc via svg2pdf (method form or global form).
+  function svgToDoc(doc, svg, opts) {
+    if (typeof doc.svg === 'function') return doc.svg(svg, opts);
+    if (typeof window.svg2pdf === 'function') {
+      return Promise.resolve(window.svg2pdf(svg, doc, opts));
+    }
+    throw new Error('SVG-to-PDF support not available.');
+  }
+
+  // Builds the PDF from the SVGs already rendered on screen, so it matches the
+  // current display (Name only / incipit / Full, including per-tune choices and
+  // the chosen setting).
+  async function exportSetPDF() {
+    if (!currentSet || !currentSet.tunes || !currentSet.tunes.length) {
+      alert('Pick or choose a set first, then export it to PDF.');
+      return;
+    }
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+      alert('PDF library failed to load.');
+      return;
+    }
+    // Open the tab now (synchronously, in the click) so it isn't popup-blocked.
+    var tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.write('<title>Generating PDF…</title>' +
+        '<p style="font-family:sans-serif;margin:2em">Generating PDF…</p>');
+    }
+    try {
+      var JsPDF = window.jspdf.jsPDF;
+      var doc = new JsPDF({ unit: 'pt', format: 'a4' });
+      var pageW = doc.internal.pageSize.getWidth();
+      var pageH = doc.internal.pageSize.getHeight();
+      var margin = 40;
+      var y = margin;
+
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+      doc.text(capitalizeWords(currentSet.rhythm) + ' set', margin, y);
+      y += 26;
+
+      var cards = setDisplay.querySelectorAll('#tuneList .tune-card');
+      for (var i = 0; i < cards.length; i++) {
+        var card = cards[i];
+        var nameEl = card.querySelector('.tune-title a');
+        var keyEl = card.querySelector('.tune-key');
+        var title = (i + 1) + '. ' + (nameEl ? nameEl.textContent : 'Tune') +
+          (keyEl && keyEl.textContent ? keyEl.textContent : '');
+
+        if (y > pageH - margin - 30) { doc.addPage(); y = margin; }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+        doc.text(title, margin, y);
+        y += 14;
+
+        var svg = card.querySelector('.abc-render svg');
+        if (svg) {
+          var vb = svg.viewBox && svg.viewBox.baseVal;
+          var rect = svg.getBoundingClientRect();
+          var sw = (vb && vb.width) || rect.width || 1;
+          var sh = (vb && vb.height) || rect.height || 1;
+          var w = pageW - margin * 2;
+          var h = sh * (w / sw);
+          if (h > pageH - margin * 2) { // scale a tall tune down to one page
+            var sc = (pageH - margin * 2) / h; h *= sc; w *= sc;
+          }
+          if (y + h > pageH - margin) { doc.addPage(); y = margin; }
+          await svgToDoc(doc, svg, { x: margin, y: y, width: w, height: h });
+          y += h + 18;
+        } else {
+          y += 6;
+        }
+      }
+
+      var url = doc.output('bloburl');
+      if (tab) tab.location.href = url; else window.open(url, '_blank');
+    } catch (e) {
+      if (tab) {
+        try {
+          tab.document.body.innerHTML =
+            '<p style="font-family:sans-serif;margin:2em">Could not generate PDF: ' +
+            e.message + '</p>';
+        } catch (er) { /* cross-origin blob tab, ignore */ }
+      }
+      alert('Could not generate PDF: ' + e.message);
+    }
+  }
+
+  if (pdfBtn) pdfBtn.addEventListener('click', exportSetPDF);
+
+  // Index of the tune card an event happened in (survives drag reordering).
+  function cardIdx(el) {
+    var card = el.closest('.tune-card');
+    return card ? Number(card.dataset.idx) : -1;
+  }
+
+  // --- Event delegation: full toggles / setting nav / mark played / reroll ---
   setDisplay.addEventListener('click', function (e) {
+    // "Name only": global override — hide all notation, show titles only.
+    var nameOnlyBtn = e.target.closest('.name-only-btn');
+    if (nameOnlyBtn) {
+      nameOnly = !nameOnly;
+      savePrefs();
+      // Full re-render: this rebuilds the list with the correct `name-only`
+      // class (compact cards), the same path used when picking with it on.
+      if (currentSet) renderSet(currentSet);
+      return;
+    }
+
+    // "All Full": flip the global state, drop per-tune overrides, re-render all.
+    var allFullBtn = e.target.closest('.all-full-btn');
+    if (allFullBtn) {
+      showFullTunes = !showFullTunes;
+      currentSet.tunes.forEach(function (t) { delete t.full; });
+      savePrefs();
+      allFullBtn.classList.toggle('on', showFullTunes);
+      currentSet.tunes.forEach(function (_, i) { renderTuneNotation(i); });
+      return;
+    }
+
+    // Per-tune "Full": override just this tune.
+    var fullBtn = e.target.closest('.full-btn');
+    if (fullBtn) {
+      var fi = cardIdx(fullBtn);
+      if (fi >= 0) {
+        var t = currentSet.tunes[fi];
+        t.full = !effectiveFull(t);
+        renderTuneNotation(fi);
+      }
+      return;
+    }
+
+    // Setting nav arrows (prev/next setting).
+    var navBtn = e.target.closest('.setting-nav');
+    if (navBtn) {
+      var ni = cardIdx(navBtn);
+      if (ni >= 0) cycleSetting(ni, Number(navBtn.dataset.dir));
+      return;
+    }
+
     var allBtn = e.target.closest('.mark-all-played-btn');
     if (allBtn && !allBtn.disabled) {
       commitSet();
@@ -1861,14 +2205,25 @@
     }
   });
 
-  // --- Event: Full tune toggle (rendered above each set) ---
-  setDisplay.addEventListener('change', function (e) {
-    if (e.target.classList.contains('full-tune-toggle')) {
-      showFullTunes = e.target.checked;
-      savePrefs();
-      if (currentSet) renderSet(currentSet);
-    }
-  });
+  // --- Swipe left/right on a tune's notation to cycle its settings ---
+  var swipeX = null, swipeY = null, swipeIdx = -1;
+  setDisplay.addEventListener('touchstart', function (e) {
+    var card = e.target.closest('.tune-card');
+    if (!card) { swipeIdx = -1; return; }
+    swipeX = e.changedTouches[0].clientX;
+    swipeY = e.changedTouches[0].clientY;
+    swipeIdx = Number(card.dataset.idx);
+  }, { passive: true });
+  setDisplay.addEventListener('touchend', function (e) {
+    if (swipeIdx < 0 || swipeX == null) return;
+    var dx = e.changedTouches[0].clientX - swipeX;
+    var dy = e.changedTouches[0].clientY - swipeY;
+    var idx = swipeIdx;
+    swipeX = swipeY = null; swipeIdx = -1;
+    // Mostly-horizontal, deliberate swipe only (don't fight vertical scroll).
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    cycleSetting(idx, dx < 0 ? 1 : -1); // swipe left -> next setting
+  }, { passive: true });
 
   // --- Init ---
   members.push({ id: null, name: null, tunebook: null, loaded: false });
@@ -1878,6 +2233,7 @@
   if (lastMid) getRow(0).querySelector('.member-input').value = lastMid;
 
   renderRecentUsersForRow(0);
+  loadSettingChoices();
 
   // Restore cached picker preferences.
   (function applyPrefs() {
@@ -1887,6 +2243,7 @@
     if (p.keyMode) keyMode = p.keyMode;
     if (typeof p.onlyKnown === 'boolean') onlyKnown = p.onlyKnown;
     if (typeof p.showFull === 'boolean') showFullTunes = p.showFull;
+    if (typeof p.nameOnly === 'boolean') nameOnly = p.nameOnly;
     if (p.popIdx) {
       ['poptunes', 'usersets', 'recordings'].forEach(function (k) {
         if (typeof p.popIdx[k] === 'number') popIdxBySource[k] = p.popIdx[k];

@@ -81,6 +81,13 @@ button:disabled {
   display: none;
 }
 
+/* #settings-section .section-body forces display:flex with id specificity, so
+   the generic collapsed rule above can't hide it. Re-hide with matching id
+   specificity when collapsed. */
+#settings-section.collapsed .section-body {
+  display: none;
+}
+
 #tunebook-section {
   display: flex;
   align-items: flex-start;
@@ -386,12 +393,35 @@ button:disabled {
   padding: 0 12px;
 }
 
-.full-tune-label {
-  font-size: 0.9em;
-  color: #444;
-  cursor: pointer;
+/* Grey "off" toggle buttons (All Full / per-tune Full) that turn light green
+   when on. */
+.toggle-btn {
+  background-color: #e0e0e0;
+  color: #333;
+  font-size: 0.85em;
+  padding: 0.3em 0.8em;
   white-space: nowrap;
 }
+
+.toggle-btn:hover { background-color: #bdbdbd; }
+
+.toggle-btn.on {
+  background-color: #a5d6a7;
+  color: #1b5e20;
+}
+
+.toggle-btn.on:hover { background-color: #94c998; }
+
+/* "Name only" group sits left of "All Full"; its on-state is light red rather
+   than green (declared after .toggle-btn.on so it wins at equal specificity). */
+.full-controls { display: flex; gap: 0.25em; }
+
+.name-only-btn.on {
+  background-color: #ef9a9a;
+  color: #b71c1c;
+}
+
+.name-only-btn.on:hover { background-color: #e88b8b; }
 
 .rec-details {
   margin: 0.6em 0 0;
@@ -435,6 +465,10 @@ button:disabled {
 .tune-info {
   flex: 1;
   font-size: 1.1em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15em;
+  min-width: 0;
 }
 
 .tune-info a {
@@ -451,14 +485,46 @@ button:disabled {
   font-size: 0.9em;
 }
 
+/* "Setting n / N" line with ‹ › nav, beneath the tune name. */
+.tune-setting {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.8em;
+  color: #777;
+}
+
+.setting-num { white-space: nowrap; }
+
+.setting-nav {
+  background-color: #e0e0e0;
+  color: #333;
+  font-size: 1em;
+  line-height: 1;
+  padding: 0 0.5em;
+  border-radius: 4px;
+}
+
+.setting-nav:hover { background-color: #bdbdbd; }
+
+/* "Name only" mode: collapse each card to just the title row so every tune
+   name fits on screen at once. */
+#tuneList.name-only .tune-card {
+  margin: 4px 0;
+  padding: 4px 12px;
+}
+
+#tuneList.name-only .abc-render { display: none; }
+#tuneList.name-only .full-btn { display: none; }
+
 .mark-played-btn {
-  background-color: #2196F3;
+  background-color: #ff9800;
   font-size: 0.85em;
   padding: 0.3em 0.8em;
   white-space: nowrap;
 }
 
-.mark-played-btn:hover { background-color: #1976D2; }
+.mark-played-btn:hover { background-color: #f57c00; }
 
 .abc-render {
   margin-top: 8px;
@@ -512,6 +578,12 @@ button:disabled {
 
 #downloadSavedBtn:hover { background-color: #455A64; }
 
+#pdfBtn {
+  background-color: #c0392b;
+}
+
+#pdfBtn:hover { background-color: #a93226; }
+
 /* Saved sets modal */
 #saved-sets-modal {
   display: none;
@@ -546,15 +618,37 @@ button:disabled {
   border-radius: 6px;
   margin: 0.5em 0;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
 }
 
 .saved-set-item:hover {
   background: #f0f0f0;
 }
 
+.saved-set-info { flex: 1; min-width: 0; }
+
 .saved-set-tunes {
   color: #666;
   font-size: 0.9em;
+}
+
+/* Red × to delete a saved set (right-aligned in the row). */
+.delete-set-btn {
+  flex: 0 0 auto;
+  background-color: transparent;
+  color: #c62828;
+  border: 1px solid #c62828;
+  border-radius: 4px;
+  padding: 0.1em 0.5em;
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.delete-set-btn:hover {
+  background-color: #c62828;
+  color: white;
 }
 
 #closeSavedModal {

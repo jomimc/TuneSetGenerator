@@ -775,10 +775,11 @@
     return sum >= size;
   }
 
-  // Greedy build: at each step take from the most-abundant remaining mode that
-  // isn't the previous one (the reorganize-string rule), so it succeeds exactly
-  // when canArrangeNoAdjacent does. Works for any byKey of mode -> [items].
-  function pickNoAdjacent(byKey, size) {
+  // Greedy fallback: at each step take from the most-abundant remaining mode
+  // that isn't the previous one (the reorganize-string rule), so it succeeds
+  // exactly when canArrangeNoAdjacent does. It oscillates between the two
+  // biggest modes, so it's only a last resort for tight pools.
+  function pickNoAdjacentGreedy(byKey, size) {
     var groups = Object.keys(byKey).map(function (m) {
       return { mode: m, items: pickRandomUnique(byKey[m], byKey[m].length) };
     });
@@ -798,6 +799,33 @@
       last = best.mode;
     }
     return picked;
+  }
+
+  // "Always Change": the ONLY rule is that each tune's mode differs from the one
+  // before it — no oscillation, no return-to-same stipulation. For variety we
+  // pick the next mode UNIFORMLY among the available distinct modes (not weighted
+  // by tune count, which would collapse to the dominant D/G), then a random tune
+  // within it. Randomised with retries; a tight pool that keeps stranding falls
+  // back to the feasibility-guaranteed greedy. Works for byKey of mode -> [items].
+  function pickNoAdjacent(byKey, size) {
+    var modes = Object.keys(byKey);
+    for (var attempt = 0; attempt < 80; attempt++) {
+      var remaining = {};
+      for (var i = 0; i < modes.length; i++) remaining[modes[i]] = byKey[modes[i]].slice();
+      var picked = [], last = null, ok = true;
+      for (var s = 0; s < size; s++) {
+        var cand = modes.filter(function (m) {
+          return m !== last && remaining[m].length > 0;
+        });
+        if (cand.length === 0) { ok = false; break; }
+        var mode = cand[Math.floor(Math.random() * cand.length)];
+        var pool = remaining[mode];
+        picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+        last = mode;
+      }
+      if (ok && picked.length === size) return picked;
+    }
+    return pickNoAdjacentGreedy(byKey, size);
   }
 
   function rhythmEligible(bucket, size, kmode) {
@@ -2084,6 +2112,7 @@
       doc.text(capitalizeWords(currentSet.rhythm) + ' set', margin, y);
       y += 26;
 
+      var maxW = pageW - margin * 2;
       var cards = setDisplay.querySelectorAll('#tuneList .tune-card');
       for (var i = 0; i < cards.length; i++) {
         var card = cards[i];
@@ -2092,22 +2121,35 @@
         var title = (i + 1) + '. ' + (nameEl ? nameEl.textContent : 'Tune') +
           (keyEl && keyEl.textContent ? keyEl.textContent : '');
 
-        if (y > pageH - margin - 30) { doc.addPage(); y = margin; }
-        doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
-        doc.text(title, margin, y);
-        y += 14;
-
+        // Measure the notation first so the title can stay with it across pages.
         var svg = card.querySelector('.abc-render svg');
+        var w = 0, h = 0;
         if (svg) {
           var vb = svg.viewBox && svg.viewBox.baseVal;
           var rect = svg.getBoundingClientRect();
           var sw = (vb && vb.width) || rect.width || 1;
           var sh = (vb && vb.height) || rect.height || 1;
-          var w = pageW - margin * 2;
-          var h = sh * (w / sw);
+          w = maxW;
+          h = sh * (w / sw);
           if (h > pageH - margin * 2) { // scale a tall tune down to one page
             var sc = (pageH - margin * 2) / h; h *= sc; w *= sc;
           }
+        }
+
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
+        var titleLines = doc.splitTextToSize(title, maxW); // wrap long names
+        var titleH = titleLines.length * 16;
+
+        // Page-break before the title if the title + its notation won't fit in
+        // the remaining space (unless we're already at the top of a page).
+        var blockH = titleH + (svg ? h + 18 : 6);
+        if (y > margin && y + Math.min(blockH, pageH - margin * 2) > pageH - margin) {
+          doc.addPage(); y = margin;
+        }
+        doc.text(titleLines, margin, y);
+        y += titleH;
+
+        if (svg) {
           if (y + h > pageH - margin) { doc.addPage(); y = margin; }
           await svgToDoc(doc, svg, { x: margin, y: y, width: w, height: h });
           y += h + 18;
@@ -2117,7 +2159,14 @@
       }
 
       var url = doc.output('bloburl');
-      if (tab) tab.location.href = url; else window.open(url, '_blank');
+      if (tab) {
+        tab.location.href = url;
+      } else if (!window.open(url, '_blank')) {
+        // Popups blocked and no pre-opened tab — fall back to a download.
+        doc.save((currentSet.rhythm || 'set') + '.pdf');
+      }
+      // Free the blob once the new tab has had time to load it.
+      setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
     } catch (e) {
       if (tab) {
         try {

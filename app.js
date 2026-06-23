@@ -111,6 +111,9 @@
   var donateBtn = document.getElementById('donateBtn');
   var donateModal = document.getElementById('donate-modal');
   var closeDonateModal = document.getElementById('closeDonateModal');
+  var aboutBtn = document.getElementById('aboutBtn');
+  var aboutModal = document.getElementById('about-modal');
+  var closeAboutModal = document.getElementById('closeAboutModal');
 
   var PLAYED_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
   var MAX_RECENT_USERS = 8;
@@ -1272,17 +1275,16 @@
   // Slider for poptunes/usersets. The slider runs left=100% … right=1% (1% is
   // the most exclusive and the default), so its raw value is inverted: a raw
   // value s maps to pct = 101 - s (s=100 -> 1%, s=1 -> 100%).
+  // Layout: "Top [box] % ≈ N tunes" sits on the label's line; the slider spans
+  // the full width on the line below (#popularityButtons is display:contents, so
+  // these become direct children of the popularity row).
   function renderPopularitySlider() {
     var pct = popPctBySource[source];
-    var wrap = document.createElement('div');
-    wrap.className = 'pop-slider';
-    wrap.innerHTML =
-      '<input type="range" id="popSlider" min="1" max="100" step="1" value="' +
-        (101 - pct) + '">' +
+    popularityButtons.innerHTML =
       '<span class="pop-pct">Top <input type="number" id="popPctInput" min="1" max="100" value="' +
-        pct + '">%</span>' +
-      '<span class="pop-count" id="popCount"></span>';
-    popularityButtons.appendChild(wrap);
+        pct + '">% <span class="pop-count" id="popCount"></span></span>' +
+      '<input type="range" id="popSlider" min="1" max="100" step="1" value="' +
+        (101 - pct) + '">';
     updatePopCount();
   }
 
@@ -2401,6 +2403,13 @@
     // The PayPal option is a placeholder until its link is added.
     if (e.target.closest('.donate-option[data-pending]')) { e.preventDefault(); return; }
     if (e.target === donateModal) donateModal.style.display = 'none';
+  });
+
+  // --- About modal (footer) ---
+  aboutBtn.addEventListener('click', function () { aboutModal.style.display = 'flex'; });
+  closeAboutModal.addEventListener('click', function () { aboutModal.style.display = 'none'; });
+  aboutModal.addEventListener('click', function (e) {
+    if (e.target === aboutModal) aboutModal.style.display = 'none';
   });
 
   // Capture-phase interceptor. mousedown is blocked too so controls don't focus

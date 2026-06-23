@@ -290,7 +290,7 @@ button:disabled {
   display: flex;
   gap: 0.8em;
   width: 100%;
-  align-items: flex-start;
+  align-items: stretch; /* Pick matches the height of the stacked action buttons */
 }
 
 .pick-btn {
@@ -300,8 +300,6 @@ button:disabled {
   font-weight: bold;
   flex: 2;
   min-width: 150px;
-  height: auto;
-  min-height: 120px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -763,8 +761,9 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.5em;
+  gap: 0.5em 0.8em;
   flex-wrap: wrap;
+  margin-bottom: 1em; /* keeps wrapped header buttons clear of the first section */
 }
 
 #app-header h1 { margin-bottom: 0.5em; }
@@ -784,23 +783,15 @@ button:disabled {
 #tourBtn:hover, #helpBtn:hover { background-color: #bdbdbd; }
 
 /* Popularity "Top X%" slider (poptunes / usersets) */
-#popularityRow #popularityButtons { flex: 1 1 auto; } /* let the slider stretch */
-
-.pop-slider {
-  display: flex;
-  align-items: center;
-  gap: 0.7em;
-  flex-wrap: wrap;
-  width: 100%;
-}
-
-#popSlider {
-  flex: 1 1 140px;
-  min-width: 120px;
-  cursor: pointer;
-}
+/* The inner container is layout-transparent so its children (the "Top X%" text
+   and the slider) lay out directly in the popularity row: text beside the
+   label, slider on its own full-width line below. */
+#popularityButtons { display: contents; }
 
 .pop-pct {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
   font-weight: bold;
   white-space: nowrap;
 }
@@ -817,7 +808,14 @@ button:disabled {
 .pop-count {
   color: #888;
   font-size: 0.85em;
+  font-weight: normal;
   white-space: nowrap;
+}
+
+#popSlider {
+  flex: 1 1 100%; /* forces the slider onto its own full-width line */
+  min-width: 0;
+  cursor: pointer;
 }
 
 /* Donate link, styled like the other header buttons but in a warm accent. */
@@ -1027,3 +1025,73 @@ body.inspect-mode .inspect-was-disabled {
   font-size: 0.9em;
   padding: 0.4em 1em;
 }
+
+/* Footer */
+#app-footer {
+  margin-top: 2.5em;
+  padding: 1.2em 0;
+  border-top: 1px solid #eee;
+  text-align: center;
+  font-size: 0.85em;
+  color: #999;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5em;
+}
+
+#app-footer a, .footer-link {
+  color: #777;
+  text-decoration: underline;
+}
+
+/* "About" opener: a button that looks like a footer link. */
+.footer-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  cursor: pointer;
+}
+.footer-link:hover, #app-footer a:hover { color: #333; background: none; }
+
+.footer-sep { color: #ccc; }
+.footer-meta { color: #aaa; }
+
+/* About modal */
+#about-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  justify-content: center;
+  align-items: center;
+  z-index: 10001;
+}
+
+#about-modal-content {
+  background: white;
+  padding: 1.5em 1.8em;
+  border-radius: 8px;
+  max-width: 540px;
+  width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+#about-modal-content h3 { margin-top: 0; }
+#about-modal-content h4 { margin: 1.4em 0 0.4em; }
+#about-modal-content p { margin: 0.6em 0; }
+#about-modal-content ul { margin: 0.4em 0; padding-left: 1.3em; }
+#about-modal-content li { margin: 0.3em 0; }
+
+#closeAboutModal {
+  margin-top: 1.4em;
+  background-color: #999;
+}
+#closeAboutModal:hover { background-color: #777; }

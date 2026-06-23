@@ -81,9 +81,9 @@
           <button type="button" data-key="change">Always Change</button>
         </div>
       </div>
-      <div class="control-row" id="popularityRow" style="display:none">
+      <div class="control-row" id="popularityRow" style="display:none" data-help="How adventurous to be — narrow to only the most popular tunes/sets, or widen the pool for more variety.">
         <label><b>Popularity:</b></label>
-        <div class="button-group" id="popularityButtons" data-help="How adventurous to be — narrow to only the most popular tunes/sets, or widen the pool for more variety."></div>
+        <div id="popularityButtons"></div>
       </div>
     </div>
   </div>
@@ -100,7 +100,7 @@
       <button id="pickBtn" class="pick-btn" data-help="Generate a new set of tunes using the current settings. This is all you need to get started.">Pick</button>
       <div id="set-actions">
         <button id="saveBtn" disabled data-help="Save this set so you can find and re-open it again later.">Save Set</button>
-        <button id="chooseSavedBtn" disabled data-help="Re-open one of your previously saved sets.">Choose Saved Set</button>
+        <button id="chooseSavedBtn" disabled data-help="Re-open one of your previously saved sets.">Load Saved Set</button>
         <button id="pdfBtn" data-help="Export the current set as a PDF (opens in a new tab) — handy for printing.">PDF</button>
       </div>
     </div>
@@ -108,6 +108,14 @@
 
   <!-- Section 4: The set (unchanged) -->
   <div id="set-display"></div>
+
+  <footer id="app-footer">
+    <button type="button" id="aboutBtn" class="footer-link">About, privacy &amp; credits</button>
+    <span class="footer-sep">·</span>
+    <a href="https://github.com/jomimc/TuneSetGenerator" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
+    <span class="footer-sep">·</span>
+    <span class="footer-meta">&copy; 2026 John McBride · MIT</span>
+  </footer>
 
   <div id="saved-sets-modal">
     <div id="saved-sets-modal-content">
@@ -143,6 +151,30 @@
     <div id="help-modal-content">
       <p id="help-modal-text"></p>
       <button id="closeHelpModal" type="button">Got it</button>
+    </div>
+  </div>
+
+  <div id="about-modal">
+    <div id="about-modal-content">
+      <h3>About Tune Set Generator</h3>
+      <p>A free tool for Irish traditional musicians to pick random sets of tunes — from your <a href="https://thesession.org" target="_blank" rel="noopener noreferrer">thesession.org</a> tunebook, or from popular, recorded and saved sets. It runs entirely in your browser; there is no server. Made by John McBride.</p>
+
+      <h4>Privacy</h4>
+      <p>No accounts, no tracking, no analytics, no ads. Your loaded tunebooks, saved sets, played history and preferences are stored only in your browser (localStorage and IndexedDB) and are never sent to me.</p>
+      <p>The app loads tune data from thesession.org; loading a tunebook or searching for a member sends those requests to thesession.org. If you search by place or use &ldquo;Use my location&rdquo;, the place name or coordinates are sent to OpenStreetMap&rsquo;s Nominatim service to find places and nearby members &mdash; this is used only for that search and isn&rsquo;t stored. The site is hosted on GitHub Pages, which may keep standard server logs (e.g. IP addresses). Donations are handled entirely by Stripe, PayPal or GitHub &mdash; this app never sees your payment details.</p>
+
+      <h4>Credits</h4>
+      <ul>
+        <li>Tune, setting, popularity and set data from <a href="https://thesession.org" target="_blank" rel="noopener noreferrer">thesession.org</a>, released into the public domain by its maintainer.</li>
+        <li>Place search &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors (Nominatim).</li>
+        <li>Icons from <a href="https://fontawesome.com" target="_blank" rel="noopener noreferrer">Font Awesome</a> (CC BY 4.0).</li>
+        <li>Built with abcjs, SortableJS, idb-keyval, SheetJS, jsPDF and svg2pdf.js.</li>
+      </ul>
+
+      <h4>Disclaimer</h4>
+      <p>Provided &ldquo;as is&rdquo;, without warranty of any kind. The code is open source under the <a href="https://github.com/jomimc/TuneSetGenerator/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>.</p>
+
+      <button id="closeAboutModal" type="button">Close</button>
     </div>
   </div>
 

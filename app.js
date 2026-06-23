@@ -37,32 +37,18 @@
   var sortedTuneIds = null;          // tune ids (with a rhythm) by adds, desc
   var sortedSetsCache = {};          // source -> sets sorted by count, desc
 
-  // Popularity options per source. "Top X%" is rank-based (the X% most popular
-  // items); recordings use explicit occurrence-count ranges.
-  var POP_OPTIONS = {
-    poptunes: [
-      { label: 'Top 50%', pct: 50 }, { label: 'Top 25%', pct: 25 },
-      { label: 'Top 10%', pct: 10 }, { label: 'Top 5%', pct: 5 },
-      { label: 'Top 1%', pct: 1 }
-    ],
-    usersets: [
-      { label: 'Any', pct: 100 }, { label: 'Top 40%', pct: 40 },
-      { label: 'Top 10%', pct: 10 }, { label: 'Top 5%', pct: 5 },
-      { label: 'Top 1%', pct: 1 }
-    ],
-    recordings: [
-      { label: 'Recorded once', min: 1, max: 1 },
-      { label: 'Recorded 2–10 times', min: 2, max: 10 },
-      { label: 'Recorded 10+ times', min: 11, max: Infinity }
-    ]
-  };
-  var POP_DEFAULT = { poptunes: 4, usersets: 1, recordings: 1 }; // poptunes now defaults to Top 1% (index 4)
-  // Each popularity source remembers its own selected option.
-  var popIdxBySource = {
-    poptunes: POP_DEFAULT.poptunes,
-    usersets: POP_DEFAULT.usersets,
-    recordings: POP_DEFAULT.recordings
-  };
+  // Popularity selection: all three popularity sources use the same continuous,
+  // rank-based "Top X%" slider (1–100, integers), remembered per source in
+  // popPctBySource. 1% is the default (the most popular items only).
+  function hasPopularity(src) {
+    return src === 'poptunes' || src === 'usersets' || src === 'recordings';
+  }
+  var popPctBySource = { poptunes: 1, usersets: 1, recordings: 1 }; // Top X%, 1–100
+  // Resolve the active popularity "option" object for a source (so the shared
+  // optionPopulation / setsForOption helpers work uniformly).
+  function currentPopOption(src) {
+    return { pct: popPctBySource[src] };
+  }
 
   var CHUNK_SIZE = 1000;
 
@@ -115,6 +101,17 @@
   var locationMore = document.getElementById('locationMore');
   var closeLocationModal = document.getElementById('closeLocationModal');
 
+  var helpBtn = document.getElementById('helpBtn');
+  var tourBtn = document.getElementById('tourBtn');
+  var inspectBanner = document.getElementById('inspect-banner');
+  var inspectDoneBtn = document.getElementById('inspectDoneBtn');
+  var helpModal = document.getElementById('help-modal');
+  var helpModalText = document.getElementById('help-modal-text');
+  var closeHelpModal = document.getElementById('closeHelpModal');
+  var donateBtn = document.getElementById('donateBtn');
+  var donateModal = document.getElementById('donate-modal');
+  var closeDonateModal = document.getElementById('closeDonateModal');
+
   var PLAYED_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
   var MAX_RECENT_USERS = 8;
 
@@ -141,7 +138,7 @@
       localStorage.setItem('pickerPrefs', JSON.stringify({
         source: source, sizeNumeric: sizeNumeric, sizeAny: sizeAny,
         keyMode: keyMode, onlyKnown: onlyKnown, showFull: showFullTunes,
-        nameOnly: nameOnly, popIdx: popIdxBySource,
+        nameOnly: nameOnly, popPct: popPctBySource,
         tunebookCollapsed: tunebookSection.classList.contains('collapsed'),
         settingsCollapsed: settingsSection.classList.contains('collapsed')
       }));
@@ -256,12 +253,14 @@
     input.className = 'member-input';
     input.min = '1';
     input.placeholder = 'e.g. 1';
+    input.setAttribute('data-help', 'Type your thesession.org member number here, then press Load Tunebook.');
     row.appendChild(input);
 
     var loadBtn = document.createElement('button');
     loadBtn.type = 'button';
     loadBtn.className = 'load-btn';
     loadBtn.textContent = 'Load Tunebook';
+    loadBtn.setAttribute('data-help', 'Fetch this member\'s tunebook from thesession.org so sets can be built from tunes they know.');
     row.appendChild(loadBtn);
 
     var reloadBtn = document.createElement('button');
@@ -269,6 +268,7 @@
     reloadBtn.className = 'reload-btn';
     reloadBtn.textContent = 'Reload';
     reloadBtn.style.display = 'none';
+    reloadBtn.setAttribute('data-help', 'Re-fetch this tunebook from thesession.org (the cached copy is used otherwise).');
     row.appendChild(reloadBtn);
 
     if (rowIndex > 0) {
@@ -277,6 +277,7 @@
       removeBtn.className = 'remove-row-btn';
       removeBtn.title = 'Remove this member';
       removeBtn.textContent = '\u00d7';
+      removeBtn.setAttribute('data-help', 'Remove this extra member row.');
       row.appendChild(removeBtn);
     }
 
@@ -284,7 +285,7 @@
     help.className = 'find-number';
     help.innerHTML =
       "Don't know your number? " +
-      '<button type="button" class="find-member-btn">Search by name or location</button>';
+      '<button type="button" class="find-member-btn" data-help="Find a member on thesession.org by name or by location, then load their tunebook without needing the number.">Search by name or location</button>';
     row.appendChild(help);
 
     var recent = document.createElement('div');
@@ -542,22 +543,16 @@
     }
     return sortedSetsCache[src];
   }
-  // Number of candidate items an option yields (before rhythm/key/size filters).
+  // Number of candidate items an option (Top X%) yields, before rhythm/key/size.
   function optionPopulation(src, opt) {
     if (src === 'poptunes') return Math.ceil(opt.pct / 100 * getSortedTuneIds().length);
     var dataset = src === 'usersets' ? userSetsData : recordedSetsData;
-    if (opt.pct != null) return Math.ceil(opt.pct / 100 * dataset.length);
-    return dataset.filter(function (s) {
-      return s.n >= opt.min && s.n <= opt.max;
-    }).length;
+    return Math.ceil(opt.pct / 100 * dataset.length);
   }
-  // The set objects an option admits (top-X% slice, or count range).
+  // The set objects an option admits (top-X% slice by save / recording count).
   function setsForOption(src, dataset, opt) {
-    if (opt.pct != null) {
-      var sorted = getSortedSets(src, dataset);
-      return sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
-    }
-    return dataset.filter(function (s) { return s.n >= opt.min && s.n <= opt.max; });
+    var sorted = getSortedSets(src, dataset);
+    return sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
   }
 
   // Load a chunked per-setting file on demand, cache in memory.
@@ -963,7 +958,7 @@
     } else {
       var dataset = src === 'usersets' ? userSetsData : recordedSetsData;
       if (!dataset) return [];
-      base = setsForOption(src, dataset, POP_OPTIONS[src][popIdxBySource[src]]);
+      base = setsForOption(src, dataset, currentPopOption(src));
     }
     var size = effectiveSize();
     if (size !== 'random') {
@@ -987,7 +982,7 @@
   function poptunesPoolIds() {
     if (!popularityData || !incipitsData) return [];
     var sorted = getSortedTuneIds();
-    var opt = POP_OPTIONS.poptunes[popIdxBySource.poptunes];
+    var opt = currentPopOption('poptunes');
     var poolIds = sorted.slice(0, Math.ceil(opt.pct / 100 * sorted.length));
     if (onlyKnown && getLoadedMembers().length > 0) {
       var known = {};
@@ -1254,7 +1249,7 @@
     var loaded = getLoadedMembers().length > 0;
     // Size and Keys apply to every source; pre-existing sets also offer "Random" size.
     randomSizeBtn.style.display = isPreExisting(source) ? '' : 'none';
-    popularityRow.style.display = POP_OPTIONS[source] ? '' : 'none';
+    popularityRow.style.display = hasPopularity(source) ? '' : 'none';
     // "Only what I know" applies to popular/recorded sets and popular tunes.
     var showKnown = loaded &&
       (source === 'usersets' || source === 'recordings' || source === 'poptunes');
@@ -1263,23 +1258,52 @@
   }
 
   // --- UI: render the popularity options for the active source ---
+  // poptunes / usersets get a continuous "Top X%" slider; recordings keep
+  // discrete count-range buttons.
+  function popUnit(src) {
+    return src === 'poptunes' ? 'tunes' : (src === 'recordings' ? 'medleys' : 'sets');
+  }
   function renderPopularityButtons() {
     popularityButtons.innerHTML = '';
-    if (!POP_OPTIONS[source]) return;
-    var opts = POP_OPTIONS[source];
-    var unit = source === 'poptunes' ? 'tunes'
-      : (source === 'recordings' ? 'medleys' : 'sets');
-    opts.forEach(function (o, i) {
-      var b = document.createElement('button');
-      b.type = 'button';
-      b.dataset.idx = String(i);
-      b.textContent = o.label;
-      var n = optionPopulation(source, o);
-      b.title = '≈' + n.toLocaleString() + ' ' + unit;
-      if (n === 0) b.disabled = true;
-      if (i === popIdxBySource[source]) b.classList.add('active');
-      popularityButtons.appendChild(b);
-    });
+    if (!hasPopularity(source)) return;
+    renderPopularitySlider();
+  }
+
+  // Slider for poptunes/usersets. The slider runs left=100% … right=1% (1% is
+  // the most exclusive and the default), so its raw value is inverted: a raw
+  // value s maps to pct = 101 - s (s=100 -> 1%, s=1 -> 100%).
+  function renderPopularitySlider() {
+    var pct = popPctBySource[source];
+    var wrap = document.createElement('div');
+    wrap.className = 'pop-slider';
+    wrap.innerHTML =
+      '<input type="range" id="popSlider" min="1" max="100" step="1" value="' +
+        (101 - pct) + '">' +
+      '<span class="pop-pct">Top <input type="number" id="popPctInput" min="1" max="100" value="' +
+        pct + '">%</span>' +
+      '<span class="pop-count" id="popCount"></span>';
+    popularityButtons.appendChild(wrap);
+    updatePopCount();
+  }
+
+  function updatePopCount() {
+    var el = document.getElementById('popCount');
+    if (!el) return;
+    var n = optionPopulation(source, currentPopOption(source));
+    el.textContent = '≈' + n.toLocaleString() + ' ' + popUnit(source);
+  }
+
+  // Apply a new Top-X% value from the slider or number box (clamped 1–100),
+  // keeping both inputs in sync. recompute=true also refreshes the rhythm counts.
+  function setPopPct(pct, recompute) {
+    pct = Math.max(1, Math.min(100, Math.round(pct || 1)));
+    popPctBySource[source] = pct;
+    var slider = document.getElementById('popSlider');
+    var box = document.getElementById('popPctInput');
+    if (slider) slider.value = String(101 - pct);
+    if (box && box.value !== String(pct)) box.value = String(pct);
+    updatePopCount();
+    if (recompute) { savePrefs(); updateRhythmDropdown(); }
   }
 
   // --- Switch source: load needed data, refresh controls ---
@@ -1322,6 +1346,7 @@
     if (!el) return;
     if (!count || count < 2) { el.style.display = 'none'; el.innerHTML = ''; return; }
     el.style.display = '';
+    el.setAttribute('data-help', 'This tune has several settings (transcriptions/keys). Use ‹ › to cycle through them for display — it doesn\'t change which tunes were picked.');
     el.innerHTML =
       '<button class="setting-nav" data-dir="-1" title="Previous setting">‹</button>' +
       '<span class="setting-num">Setting ' + (cur + 1) + ' / ' + count + '</span>' +
@@ -1387,11 +1412,14 @@
       '<div class="set-controls">' +
         '<div class="full-controls">' +
           '<button class="name-only-btn toggle-btn' + (nameOnly ? ' on' : '') +
-            '" title="Show tune names only, no notation">Name only</button>' +
+            '" title="Show tune names only, no notation"' +
+            ' data-help="Hide all notation and show tune names only.">Name only</button>' +
           '<button class="all-full-btn toggle-btn' + (showFullTunes ? ' on' : '') +
-            '" title="Show every tune in full">All Full</button>' +
+            '" title="Show every tune in full"' +
+            ' data-help="Show every tune in the set in full notation, instead of just the opening bars.">All Full</button>' +
         '</div>' +
-        '<button class="mark-all-played-btn"' + (setCommitted ? ' disabled' : '') + '>' +
+        '<button class="mark-all-played-btn"' + (setCommitted ? ' disabled' : '') +
+          ' data-help="Mark all tunes in this set as played (a 24-hour cooldown) without saving the set.">' +
           '&#10004; Mark All Played</button>' +
       '</div>';
 
@@ -1410,23 +1438,26 @@
       // Reroll only makes sense for tunebook-random sets and popular tunes;
       // pre-existing sets (popular/recorded) are shown intact.
       var rerollHtml = (source === 'random' || source === 'poptunes')
-        ? '<button class="reroll-btn" data-idx="' + i + '"' + dis + ' title="Replace with a new random tune">&#8634; Reroll</button>'
+        ? '<button class="reroll-btn" data-idx="' + i + '"' + dis + ' title="Replace with a new random tune"' +
+          ' data-help="Replace just this tune with a new random one, leaving the rest of the set unchanged.">&#8634; Reroll</button>'
         : '';
 
       var header = document.createElement('div');
       header.className = 'tune-header';
       header.innerHTML =
-        '<span class="drag-handle">&#9776;</span>' +
+        '<span class="drag-handle" data-help="Drag this handle to reorder the tunes within the set.">&#9776;</span>' +
         '<span class="tune-info">' +
           '<span class="tune-title">' +
-            '<a href="' + tune.url + '" target="_blank">' + tune.name + '</a>' +
+            '<a href="' + tune.url + '" target="_blank" data-help="Opens this tune\'s page on thesession.org in a new tab.">' + tune.name + '</a>' +
             '<span class="tune-key"></span>' +
           '</span>' +
           '<span class="tune-setting" style="display:none"></span>' +
         '</span>' +
-        '<button class="full-btn toggle-btn" title="Show this tune in full">Full</button>' +
+        '<button class="full-btn toggle-btn" title="Show this tune in full"' +
+          ' data-help="Show this one tune in full notation (instead of just the opening bars).">Full</button>' +
         rerollHtml +
-        '<button class="mark-played-btn" data-tune-id="' + tune.id + '" data-idx="' + i + '"' + dis + '>' +
+        '<button class="mark-played-btn" data-tune-id="' + tune.id + '" data-idx="' + i + '"' + dis +
+          ' data-help="Mark this tune as played — it won\'t be picked again for 24 hours.">' +
           '&#10004; Played</button>';
       card.appendChild(header);
 
@@ -1836,16 +1867,13 @@
   wireCollapsible(tunebookHeaderBtn, tunebookSection);
   wireCollapsible(settingsHeaderBtn, settingsSection);
 
-  // --- Event: Popularity option buttons (remembered per source) ---
-  popularityButtons.addEventListener('click', function (e) {
-    var btn = e.target.closest('button[data-idx]');
-    if (!btn || btn.disabled) return;
-    popIdxBySource[source] = Number(btn.dataset.idx);
-    popularityButtons.querySelectorAll('button').forEach(function (b) {
-      b.classList.toggle('active', b === btn);
-    });
-    savePrefs();
-    updateRhythmDropdown();
+  // --- Event: Popularity "Top X%" slider / number box (all popularity sources) ---
+  popularityButtons.addEventListener('input', function (e) {
+    if (e.target.id === 'popSlider') setPopPct(101 - Number(e.target.value), false);
+  });
+  popularityButtons.addEventListener('change', function (e) {
+    if (e.target.id === 'popSlider') { savePrefs(); updateRhythmDropdown(); }
+    else if (e.target.id === 'popPctInput') setPopPct(Number(e.target.value), true);
   });
 
   // --- Event: Only-known toggle ---
@@ -2293,9 +2321,11 @@
     if (typeof p.onlyKnown === 'boolean') onlyKnown = p.onlyKnown;
     if (typeof p.showFull === 'boolean') showFullTunes = p.showFull;
     if (typeof p.nameOnly === 'boolean') nameOnly = p.nameOnly;
-    if (p.popIdx) {
+    if (p.popPct) {
       ['poptunes', 'usersets', 'recordings'].forEach(function (k) {
-        if (typeof p.popIdx[k] === 'number') popIdxBySource[k] = p.popIdx[k];
+        if (typeof p.popPct[k] === 'number') {
+          popPctBySource[k] = Math.max(1, Math.min(100, Math.round(p.popPct[k])));
+        }
       });
     }
     if (p.source && document.querySelector('[data-source="' + p.source + '"]')) {
@@ -2319,11 +2349,178 @@
     }
   })();
 
+  // ===================================================================
+  // Help: inspect mode + first-run tutorial tour
+  // ===================================================================
+
+  // --- Inspect mode: tap any control to read its data-help string ---
+  var inspectMode = false;
+  var inspectReenabled = null; // controls we temporarily un-disabled for inspection
+
+  function setInspectMode(on) {
+    inspectMode = on;
+    document.body.classList.toggle('inspect-mode', on);
+    helpBtn.classList.toggle('on', on);
+    helpBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    inspectBanner.style.display = on ? '' : 'none';
+    if (on) {
+      // Disabled controls don't fire click events, so help would be
+      // unreachable on them. Temporarily un-disable any annotated disabled
+      // control (the click is intercepted anyway) while keeping its look.
+      inspectReenabled = Array.prototype.slice.call(
+        document.querySelectorAll('[data-help]:disabled, [data-help] :disabled'));
+      inspectReenabled.forEach(function (el) {
+        el.disabled = false;
+        el.classList.add('inspect-was-disabled');
+      });
+    } else {
+      if (inspectReenabled) inspectReenabled.forEach(function (el) {
+        el.disabled = true;
+        el.classList.remove('inspect-was-disabled');
+      });
+      inspectReenabled = null;
+      hideHelpDialog();
+    }
+  }
+
+  function showHelpDialog(text) {
+    helpModalText.textContent = text;
+    helpModal.style.display = 'flex';
+  }
+  function hideHelpDialog() { helpModal.style.display = 'none'; }
+
+  helpBtn.addEventListener('click', function () { setInspectMode(!inspectMode); });
+  inspectDoneBtn.addEventListener('click', function () { setInspectMode(false); });
+  closeHelpModal.addEventListener('click', hideHelpDialog);
+  helpModal.addEventListener('click', function (e) { if (e.target === helpModal) hideHelpDialog(); });
+
+  // --- Donation modal ---
+  donateBtn.addEventListener('click', function () { donateModal.style.display = 'flex'; });
+  closeDonateModal.addEventListener('click', function () { donateModal.style.display = 'none'; });
+  donateModal.addEventListener('click', function (e) {
+    // The PayPal option is a placeholder until its link is added.
+    if (e.target.closest('.donate-option[data-pending]')) { e.preventDefault(); return; }
+    if (e.target === donateModal) donateModal.style.display = 'none';
+  });
+
+  // Capture-phase interceptor. mousedown is blocked too so controls don't focus
+  // or start dragging; click shows the help. The rhythm <select> can open its
+  // native popup on its own, so in inspect mode CSS gives it pointer-events:none
+  // and its row carries the data-help (tapping it surfaces help, never opens).
+  function inspectIntercept(e) {
+    if (!inspectMode) return;
+    // Don't intercept the help controls themselves.
+    if (e.target.closest('#helpBtn') || e.target.closest('#inspect-banner') ||
+        e.target.closest('#help-modal')) return;
+    var el = e.target.closest('[data-help]');
+    if (!el) return; // blank/un-annotated areas pass through normally
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'click') showHelpDialog(el.getAttribute('data-help'));
+  }
+  document.addEventListener('mousedown', inspectIntercept, true);
+  document.addEventListener('click', inspectIntercept, true);
+
+  // --- First-run tutorial tour (spotlight + tooltip over real elements) ---
+  var TOUR_STEPS = [
+    { sel: '#pickBtn',
+      title: 'Press Pick to start',
+      text: 'Just tap Pick and you instantly get a set of tunes. That’s all you need to get going!' },
+    { sel: '#settingsHeaderBtn',
+      title: 'Change the settings',
+      text: 'Open Settings to choose where tunes come from, how many per set, their key relationship, and how popular they are.' },
+    { sel: '#tunebookHeaderBtn',
+      title: 'Load your tunebook (optional)',
+      text: 'Got a thesession.org tunebook? Load it here to build sets from tunes you already know. You can skip this and still use the app.' }
+  ];
+  var tourIdx = -1;
+  var tourEls = null;
+
+  function buildTourEls() {
+    var catcher = document.createElement('div'); catcher.id = 'tour-catcher';
+    var highlight = document.createElement('div'); highlight.id = 'tour-highlight';
+    var tip = document.createElement('div'); tip.id = 'tour-tooltip';
+    document.body.appendChild(catcher);
+    document.body.appendChild(highlight);
+    document.body.appendChild(tip);
+    return { catcher: catcher, highlight: highlight, tip: tip };
+  }
+
+  function endTour() {
+    if (!tourEls) return;
+    window.removeEventListener('resize', repositionTour);
+    tourEls.catcher.remove();
+    tourEls.highlight.remove();
+    tourEls.tip.remove();
+    tourEls = null;
+    tourIdx = -1;
+    try { localStorage.setItem('tourSeen', '1'); } catch (e) {}
+  }
+
+  function repositionTour() {
+    if (!tourEls || tourIdx < 0) return;
+    var step = TOUR_STEPS[tourIdx];
+    var target = document.querySelector(step.sel);
+    if (!target) return;
+    var r = target.getBoundingClientRect();
+    var pad = 6;
+    var h = tourEls.highlight;
+    h.style.top = (r.top - pad) + 'px';
+    h.style.left = (r.left - pad) + 'px';
+    h.style.width = (r.width + pad * 2) + 'px';
+    h.style.height = (r.height + pad * 2) + 'px';
+    // Tooltip below the target if it sits in the top half, otherwise above.
+    var tip = tourEls.tip;
+    var below = r.bottom < window.innerHeight * 0.55;
+    if (below) { tip.style.top = (r.bottom + pad + 12) + 'px'; tip.style.bottom = 'auto'; }
+    else { tip.style.bottom = (window.innerHeight - r.top + pad + 12) + 'px'; tip.style.top = 'auto'; }
+  }
+
+  function showTourStep(i) {
+    tourIdx = i;
+    var step = TOUR_STEPS[i];
+    var target = document.querySelector(step.sel);
+    if (!target) { // skip a missing target gracefully
+      if (i + 1 < TOUR_STEPS.length) return showTourStep(i + 1);
+      return endTour();
+    }
+    var last = i === TOUR_STEPS.length - 1;
+    tourEls.tip.innerHTML =
+      '<h4>' + step.title + '</h4>' +
+      '<p>' + step.text + '</p>' +
+      '<div class="tour-nav">' +
+        '<button type="button" class="tour-skip">Skip</button>' +
+        '<span class="tour-count">' + (i + 1) + ' / ' + TOUR_STEPS.length + '</span>' +
+        '<button type="button" class="tour-next">' + (last ? 'Done' : 'Next') + '</button>' +
+      '</div>';
+    tourEls.tip.querySelector('.tour-skip').onclick = endTour;
+    tourEls.tip.querySelector('.tour-next').onclick = function () {
+      if (last) endTour(); else showTourStep(i + 1);
+    };
+    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setTimeout(repositionTour, 320);
+  }
+
+  function startTour() {
+    if (tourEls) return;            // already running
+    if (inspectMode) setInspectMode(false);
+    tourEls = buildTourEls();
+    window.addEventListener('resize', repositionTour);
+    showTourStep(0);
+  }
+
+  tourBtn.addEventListener('click', startTour);
+
   applySource(); // sets control visibility, size/popularity buttons, rhythm list
 
   // Pre-load incipits data in background
   loadIncipitsData().catch(function (e) {
     console.warn('Failed to pre-load incipits:', e.message);
   });
+
+  // First-time visitors get the quick tour automatically (once layout settles).
+  try {
+    if (!localStorage.getItem('tourSeen')) setTimeout(startTour, 600);
+  } catch (e) {}
 
 })();

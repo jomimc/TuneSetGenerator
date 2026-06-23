@@ -754,3 +754,276 @@ button:disabled {
 }
 
 .modal-credit a { color: #999; }
+
+/* ===================================================================
+   Help: header actions, inspect mode, help dialog, tutorial tour
+   =================================================================== */
+
+#app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5em;
+  flex-wrap: wrap;
+}
+
+#app-header h1 { margin-bottom: 0.5em; }
+
+#header-actions {
+  display: flex;
+  gap: 0.5em;
+}
+
+#tourBtn, #helpBtn {
+  background-color: #e0e0e0;
+  color: #333;
+  font-size: 0.85em;
+  padding: 0.4em 0.9em;
+}
+
+#tourBtn:hover, #helpBtn:hover { background-color: #bdbdbd; }
+
+/* Popularity "Top X%" slider (poptunes / usersets) */
+#popularityRow #popularityButtons { flex: 1 1 auto; } /* let the slider stretch */
+
+.pop-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+#popSlider {
+  flex: 1 1 140px;
+  min-width: 120px;
+  cursor: pointer;
+}
+
+.pop-pct {
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+#popPctInput {
+  width: 3.6em;
+  padding: 0.3em 0.4em;
+  font-size: 1em;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  text-align: right;
+}
+
+.pop-count {
+  color: #888;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+/* Donate link, styled like the other header buttons but in a warm accent. */
+#donateBtn {
+  display: inline-block;
+  background-color: #ea4aaa;
+  color: white;
+  font-size: 0.85em;
+  padding: 0.4em 0.9em;
+  border-radius: 6px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+#donateBtn:hover { background-color: #d63a98; }
+
+/* Donation modal */
+#donate-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  justify-content: center;
+  align-items: center;
+  z-index: 10001;
+}
+
+#donate-modal-content {
+  background: white;
+  padding: 1.5em;
+  border-radius: 8px;
+  max-width: 460px;
+  width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+#donate-modal-content h3 { margin-top: 0; }
+
+.donate-intro { margin: 0 0 1.2em; line-height: 1.5; }
+
+.donate-option {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  padding: 0.8em;
+  margin: 0.6em 0;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #333;
+}
+
+.donate-option:hover { background: #f5f5f5; border-color: #bbb; }
+
+.donate-option[data-pending] { cursor: default; opacity: 0.7; }
+.donate-option[data-pending]:hover { background: none; border-color: #ddd; }
+
+.donate-logo {
+  flex: 0 0 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.donate-logo svg { width: 40px; height: 40px; display: block; }
+
+.donate-text { flex: 1; line-height: 1.4; }
+.donate-text em { color: #999; font-size: 0.9em; }
+
+#closeDonateModal {
+  margin-top: 1em;
+  background-color: #999;
+}
+
+#closeDonateModal:hover { background-color: #777; }
+
+/* Help button lights up while inspect mode is on. */
+#helpBtn.on { background-color: #a5d6a7; color: #1b5e20; }
+#helpBtn.on:hover { background-color: #94c998; }
+
+/* Inspect mode banner */
+#inspect-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8em;
+  background-color: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  padding: 0.6em 0.9em;
+  margin-bottom: 1em;
+  font-size: 0.9em;
+}
+
+#inspectDoneBtn {
+  flex: 0 0 auto;
+  background-color: #999;
+  font-size: 0.85em;
+  padding: 0.3em 0.8em;
+}
+#inspectDoneBtn:hover { background-color: #777; }
+
+/* In inspect mode, every annotated control (and its children) shows the help
+   cursor, not the action/finger cursor — consistent across buttons, selects,
+   inputs and grouped controls. */
+body.inspect-mode [data-help],
+body.inspect-mode [data-help] * { cursor: help !important; }
+body.inspect-mode [data-help]:hover {
+  outline: 2px solid #ffb300;
+  outline-offset: 2px;
+}
+
+/* The rhythm <select> opens its own native popup, so let taps fall through to
+   its row (which holds the data-help) instead of opening the list. */
+body.inspect-mode #rhythmSelect { pointer-events: none; }
+
+/* Controls we temporarily un-disabled for inspection keep their disabled look. */
+body.inspect-mode .inspect-was-disabled {
+  background-color: #999;
+  opacity: 0.6;
+}
+
+/* Help dialog (shared modal styling, like the saved-sets modal) */
+#help-modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  justify-content: center;
+  align-items: center;
+  z-index: 10001;
+}
+
+#help-modal-content {
+  background: white;
+  padding: 1.5em;
+  border-radius: 8px;
+  max-width: 420px;
+  width: 90%;
+}
+
+#help-modal-text {
+  margin: 0 0 1.2em;
+  line-height: 1.5;
+}
+
+#closeHelpModal { background-color: #4CAF50; }
+
+/* Tutorial tour spotlight */
+#tour-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: transparent;
+}
+
+#tour-highlight {
+  position: fixed;
+  z-index: 9999;
+  border-radius: 8px;
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
+  transition: top 0.2s, left 0.2s, width 0.2s, height 0.2s;
+}
+
+#tour-tooltip {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  background: white;
+  border-radius: 8px;
+  padding: 1em 1.2em;
+  width: 320px;
+  max-width: 90vw;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+#tour-tooltip h4 { margin: 0 0 0.4em; font-size: 1.05em; }
+#tour-tooltip p { margin: 0 0 1em; line-height: 1.45; font-size: 0.95em; }
+
+.tour-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tour-count { font-size: 0.85em; color: #888; }
+
+.tour-skip {
+  background-color: transparent;
+  color: #888;
+  padding: 0.3em 0.6em;
+  font-size: 0.85em;
+}
+.tour-skip:hover { background-color: #f0f0f0; }
+
+.tour-next {
+  background-color: #4CAF50;
+  font-size: 0.9em;
+  padding: 0.4em 1em;
+}

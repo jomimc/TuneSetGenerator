@@ -137,6 +137,7 @@
 
   // --- Picker preferences (cached in localStorage; stable across sessions) ---
   function savePrefs() {
+    if (tourSnapshot) return; // never persist the sandboxed tutorial configuration
     try {
       localStorage.setItem('pickerPrefs', JSON.stringify({
         source: source, sizeNumeric: sizeNumeric, sizeAny: sizeAny,
@@ -1317,6 +1318,11 @@
       else if (source === 'poptunes') { await loadPopularity(); await loadIncipitsData(); }
       else if (source === 'mysets') { await loadIncipitsData(); await ensureMySets(); }
     } catch (e) {
+      // Inside the tutorial tour's sandboxed demo pick (entry through exit,
+      // including the restore afterward), let the failure propagate instead
+      // of alerting — the tour handles its own errors silently (see
+      // enterTourMode/exitTourMode/showTourStep).
+      if (tourModeActive) throw e;
       alert('Could not load data for this source: ' + e.message);
     }
     updateSizeButtons();
@@ -1908,38 +1914,39 @@
     updateRhythmDropdown();
   });
 
+  // --- Pick set: shared by the Pick button and the tutorial tour's demo step ---
+  async function performPick() {
+    await loadIncipitsData();
+    if (source === 'random') {
+      if (getLoadedMembers().length === 0) {
+        throw new Error('Load a tunebook first, or choose a different Source.');
+      }
+      currentSet = pickSet(rhythmSelect.value);
+    } else if (source === 'usersets') {
+      await loadUserSets();
+      currentSet = pickPopularSet('usersets');
+      currentSet.note = 'saved by ' + currentSet.popularity +
+        ' user' + (currentSet.popularity === 1 ? '' : 's');
+    } else if (source === 'recordings') {
+      await loadRecordedSets();
+      currentSet = pickPopularSet('recordings');
+      currentSet.note = 'recorded ' + currentSet.popularity +
+        ' time' + (currentSet.popularity === 1 ? '' : 's');
+    } else if (source === 'poptunes') {
+      await loadPopularity();
+      currentSet = pickPopularTunes();
+    } else if (source === 'mysets') {
+      await ensureMySets();
+      currentSet = pickMySet();
+    }
+    setCommitted = false;
+    saveBtn.disabled = false;
+    await renderSet(currentSet);
+  }
+
   // --- Event: Pick set ---
   pickBtn.addEventListener('click', async function () {
-    try {
-      await loadIncipitsData();
-      if (source === 'random') {
-        if (getLoadedMembers().length === 0) {
-          throw new Error('Load a tunebook first, or choose a different Source.');
-        }
-        currentSet = pickSet(rhythmSelect.value);
-      } else if (source === 'usersets') {
-        await loadUserSets();
-        currentSet = pickPopularSet('usersets');
-        currentSet.note = 'saved by ' + currentSet.popularity +
-          ' user' + (currentSet.popularity === 1 ? '' : 's');
-      } else if (source === 'recordings') {
-        await loadRecordedSets();
-        currentSet = pickPopularSet('recordings');
-        currentSet.note = 'recorded ' + currentSet.popularity +
-          ' time' + (currentSet.popularity === 1 ? '' : 's');
-      } else if (source === 'poptunes') {
-        await loadPopularity();
-        currentSet = pickPopularTunes();
-      } else if (source === 'mysets') {
-        await ensureMySets();
-        currentSet = pickMySet();
-      }
-      setCommitted = false;
-      saveBtn.disabled = false;
-      await renderSet(currentSet);
-    } catch (e) {
-      alert(e.message);
-    }
+    try { await performPick(); } catch (e) { alert(e.message); }
   });
 
   // --- Event: Save set ---
@@ -2431,6 +2438,15 @@
   document.addEventListener('click', inspectIntercept, true);
 
   // --- First-run tutorial tour (spotlight + tooltip over real elements) ---
+  // tourSnapshot is non-null while the tour is running a sandboxed "tutorial
+  // configuration" demo pick (see enterTourMode/exitTourMode below).
+  // tourModeActive spans the whole enter→exit lifecycle (a superset of
+  // tourSnapshot's lifetime — it stays true through exitTourMode's own
+  // restore call to applySource(), after tourSnapshot has been cleared to
+  // null so savePrefs()/handlers resume normal behaviour immediately).
+  var tourSnapshot = null;
+  var tourModeActive = false;
+
   var TOUR_STEPS = [
     { sel: '#pickBtn',
       title: 'Press Pick to start',
@@ -2440,10 +2456,33 @@
       text: 'Open Settings to choose where tunes come from, how many per set, their key relationship, and how popular they are.' },
     { sel: '#tunebookHeaderBtn',
       title: 'Load your tunebook (optional)',
-      text: 'Got a thesession.org tunebook? Load it here to build sets from tunes you already know. You can skip this and still use the app.' }
+      text: 'Got a thesession.org tunebook? Load it here to build sets from tunes you already know. You can skip this and still use the app.' },
+    { sel: '#set-display .set-header',
+      title: 'Let’s see what happens!',
+      before: function () { return enterTourMode().then(performPick); },
+      text: 'Here’s a freshly picked set. (For this demo we’ve temporarily switched to popular tunes with simple settings — your own settings come back when the tour ends.)' },
+    { sel: '#tuneList .tune-card .drag-handle',
+      title: 'Drag to reorder',
+      text: 'Grab this handle to drag a tune up or down and rearrange the set.' },
+    { sel: '#tuneList .tune-card .reroll-btn',
+      title: 'Reroll a tune',
+      text: 'Not feeling this tune? Reroll swaps just this one for another, leaving the rest of the set alone.' },
+    { sel: '#tuneList .tune-card .full-btn',
+      title: 'See the full tune',
+      text: 'Tunes show just their opening bars by default. Full shows this tune’s complete notation — All Full and Name only (above the set) control all tunes at once.' },
+    { sel: '#tuneList .tune-card .mark-played-btn',
+      title: 'Mark tunes played',
+      text: 'Played puts a tune on a 24-hour cooldown so it won’t be picked again today. Mark All Played does the whole set in one go.' },
+    { sel: '#saveBtn',
+      title: 'Save sets you like',
+      text: 'Save Set keeps this set on this device (in your browser — not on your thesession.org account), so you can re-open it later from Choose Saved Set.' },
+    { sel: '#pdfBtn',
+      title: 'Print it',
+      text: 'PDF turns the current set into a printable PDF, exactly as it’s displayed on screen.' }
   ];
   var tourIdx = -1;
   var tourEls = null;
+  var tourBusy = false; // true while a step's `before` hook is in flight
 
   function buildTourEls() {
     var catcher = document.createElement('div'); catcher.id = 'tour-catcher';
@@ -2455,6 +2494,64 @@
     return { catcher: catcher, highlight: highlight, tip: tip };
   }
 
+  // --- Sandboxed "tutorial mode": snapshot real settings, apply a config that
+  // is always feasible with no tunebook, run a real pick, then restore. Never
+  // goes through click handlers / setPopPct, which call savePrefs() and would
+  // persist tutorial values to localStorage (savePrefs() also self-guards on
+  // tourSnapshot as belt-and-braces).
+  async function enterTourMode() {
+    tourModeActive = true;
+    tourSnapshot = {
+      source: source, sizeNumeric: sizeNumeric, sizeAny: sizeAny,
+      keyMode: keyMode, onlyKnown: onlyKnown,
+      showFullTunes: showFullTunes, nameOnly: nameOnly,
+      popPct: Object.assign({}, popPctBySource),
+      rhythm: rhythmSelect.value,
+      currentSet: currentSet, setCommitted: setCommitted,
+      saveDisabled: saveBtn.disabled,
+      hadSet: !!currentSet
+    };
+    source = 'poptunes'; sizeNumeric = 3; sizeAny = false;
+    keyMode = 'any'; onlyKnown = false;
+    showFullTunes = false; nameOnly = false;
+    popPctBySource.poptunes = 1;
+    setCommitted = false;
+    setSourceActive(source);
+    keyButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.key === keyMode);
+    });
+    onlyKnownToggle.checked = onlyKnown;
+    await applySource(); // loads popularity + incipits, updates size/pop/rhythm UI
+    rhythmSelect.value = 'random'; // after applySource, which rebuilds the dropdown
+  }
+
+  async function exitTourMode() {
+    if (!tourSnapshot) return;
+    var s = tourSnapshot;
+    tourSnapshot = null; // clear first so savePrefs()/handlers behave normally again
+    source = s.source; sizeNumeric = s.sizeNumeric; sizeAny = s.sizeAny;
+    keyMode = s.keyMode; onlyKnown = s.onlyKnown;
+    showFullTunes = s.showFullTunes; nameOnly = s.nameOnly;
+    Object.assign(popPctBySource, s.popPct);
+    currentSet = s.currentSet; setCommitted = s.setCommitted;
+    setSourceActive(source);
+    keyButtons.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.key === keyMode);
+    });
+    onlyKnownToggle.checked = onlyKnown;
+    try { await applySource(); } catch (e) { /* restore must not die */ }
+    // Restore the saved rhythm only if still present and pickable (counts can
+    // change); otherwise fall back to 'random'.
+    var stillPickable = Array.prototype.some.call(rhythmSelect.options, function (o) {
+      return o.value === s.rhythm && !o.disabled;
+    });
+    rhythmSelect.value = stillPickable ? s.rhythm : 'random';
+    saveBtn.disabled = s.saveDisabled;
+    if (s.hadSet) await renderSet(currentSet);
+    else setDisplay.innerHTML = '';
+    tourModeActive = false;
+  }
+
   function endTour() {
     if (!tourEls) return;
     window.removeEventListener('resize', repositionTour);
@@ -2464,6 +2561,7 @@
     tourEls = null;
     tourIdx = -1;
     try { localStorage.setItem('tourSeen', '1'); } catch (e) {}
+    exitTourMode(); // fire-and-forget; no-op when tour mode was never entered
   }
 
   function repositionTour() {
@@ -2485,8 +2583,8 @@
     else { tip.style.bottom = (window.innerHeight - r.top + pad + 12) + 'px'; tip.style.top = 'auto'; }
   }
 
-  function showTourStep(i) {
-    tourIdx = i;
+  // Renders step i's spotlight + tooltip. Assumes any `before` hook already resolved.
+  function renderTourStep(i) {
     var step = TOUR_STEPS[i];
     var target = document.querySelector(step.sel);
     if (!target) { // skip a missing target gracefully
@@ -2502,17 +2600,47 @@
         '<span class="tour-count">' + (i + 1) + ' / ' + TOUR_STEPS.length + '</span>' +
         '<button type="button" class="tour-next">' + (last ? 'Done' : 'Next') + '</button>' +
       '</div>';
-    tourEls.tip.querySelector('.tour-skip').onclick = endTour;
+    tourEls.tip.querySelector('.tour-skip').onclick = function () {
+      if (tourBusy) return;
+      endTour();
+    };
     tourEls.tip.querySelector('.tour-next').onclick = function () {
+      if (tourBusy) return;
       if (last) endTour(); else showTourStep(i + 1);
     };
     target.scrollIntoView({ block: 'center', behavior: 'smooth' });
     setTimeout(repositionTour, 320);
   }
 
+  function showTourStep(i) {
+    if (tourBusy) return; // guard against a rapid double Next/Skip fire
+    tourIdx = i;
+    var step = TOUR_STEPS[i];
+    if (!step.before) { renderTourStep(i); return; }
+    tourBusy = true;
+    Promise.resolve(step.before()).then(function () {
+      tourBusy = false;
+      renderTourStep(i);
+    }).catch(function () {
+      // Demo could not run (e.g. data fetch failed offline). End the tour
+      // cleanly — endTour() restores state and sets tourSeen, no alert spam.
+      tourBusy = false;
+      endTour();
+    });
+  }
+
+  // Modals sit at a lower z-index than the tour catcher; close any that are
+  // open so the tour doesn't trap one dimmed and unclickable behind it.
+  function closeAllModalsForTour() {
+    [savedSetsModal, locationModal, helpModal, donateModal, aboutModal].forEach(function (m) {
+      if (m) m.style.display = 'none';
+    });
+  }
+
   function startTour() {
     if (tourEls) return;            // already running
     if (inspectMode) setInspectMode(false);
+    closeAllModalsForTour();
     tourEls = buildTourEls();
     window.addEventListener('resize', repositionTour);
     showTourStep(0);

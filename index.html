@@ -160,7 +160,7 @@
       <p>A free tool for Irish traditional musicians to pick random sets of tunes — from your <a href="https://thesession.org" target="_blank" rel="noopener noreferrer">thesession.org</a> tunebook, or from popular, recorded and saved sets. It runs entirely in your browser; there is no server. Made by John McBride.</p>
 
       <h4>Privacy</h4>
-      <p>No accounts, no tracking, no analytics, no ads. Your loaded tunebooks, saved sets, played history and preferences are stored only in your browser (localStorage and IndexedDB) and are never sent to me.</p>
+      <p>No accounts and no ads. I use <a href="https://www.goatcounter.com" target="_blank" rel="noopener noreferrer">GoatCounter</a> for anonymous visit counts (which pages are viewed, roughly where visitors come from) &mdash; it uses no cookies and collects no personal data. Your loaded tunebooks, saved sets, played history and preferences are stored only in your browser (localStorage and IndexedDB) and are never sent to me.</p>
       <p>The app loads tune data from thesession.org; loading a tunebook or searching for a member sends those requests to thesession.org. If you search by place or use &ldquo;Use my location&rdquo;, the place name or coordinates are sent to OpenStreetMap&rsquo;s Nominatim service to find places and nearby members &mdash; this is used only for that search and isn&rsquo;t stored. The site is hosted on GitHub Pages, which may keep standard server logs (e.g. IP addresses). Donations are handled entirely by Stripe, PayPal or GitHub &mdash; this app never sees your payment details.</p>
 
       <h4>Credits</h4>
@@ -215,5 +215,8 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
   <script src="app.js"></script>
+  <!-- GoatCounter: anonymous, cookie-free visit counts -->
+  <script data-goatcounter="https://jmmcbride.goatcounter.com/count"
+          async src="//gc.zgo.at/count.js"></script>
 </body>
 </html>
